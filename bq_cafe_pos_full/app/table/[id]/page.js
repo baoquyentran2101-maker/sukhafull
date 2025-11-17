@@ -26,13 +26,13 @@ export default function TablePage({ params }) {
     setTable(data);
   }
 
-  async function loadGroups() {
-    const { data } = await supabase
+  async function loadGroupsAndItems() {
+    const { data: g } = await supabase
       .from('menu_groups')
       .select('id, name, sort')
       .order('sort', { ascending: true });
-    setGroups(data || []);
-    if (data && data.length > 0 && !activeGroup) setActiveGroup(data[0].id);
+    setGroups(g || []);
+    if (g && g.length > 0 && !activeGroup) setActiveGroup(g[0].id);
   }
 
   async function loadItems(groupId) {
@@ -74,7 +74,7 @@ export default function TablePage({ params }) {
 
   useEffect(() => {
     loadTable();
-    loadGroups();
+    loadGroupsAndItems();
     loadOpenOrder();
   }, [tableId]);
 
@@ -109,7 +109,10 @@ export default function TablePage({ params }) {
       .single();
     if (!error) {
       setOrder(data);
-      await supabase.from('cafe_tables').update({ status: 'in_use' }).eq('id', tableId);
+      await supabase
+        .from('cafe_tables')
+        .update({ status: 'in_use' })
+        .eq('id', tableId);
       return data;
     }
     return null;
@@ -122,7 +125,7 @@ export default function TablePage({ params }) {
       order_id: currentOrder.id,
       item_name: item.name,
       price: item.price,
-      qty: 1,
+      qty: 1
     });
     await loadOrderItems(currentOrder.id);
   }
@@ -134,10 +137,13 @@ export default function TablePage({ params }) {
       await supabase.from('payments').insert({
         order_id: order.id,
         method: payMethod,
-        paid_amount: orderTotal,
+        paid_amount: orderTotal
       });
       await supabase.from('orders').update({ status: 'paid' }).eq('id', order.id);
-      await supabase.from('cafe_tables').update({ status: 'empty' }).eq('id', tableId);
+      await supabase
+        .from('cafe_tables')
+        .update({ status: 'empty' })
+        .eq('id', tableId);
 
       setOrder(null);
       setOrderItems([]);
@@ -158,7 +164,6 @@ export default function TablePage({ params }) {
       </div>
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        {/* Chọn món */}
         <div style={{ flex: 1, borderRight: '1px solid #eee', paddingRight: 8 }}>
           <h4>Chọn món</h4>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
@@ -171,7 +176,7 @@ export default function TablePage({ params }) {
                   borderRadius: 999,
                   border: activeGroup === g.id ? '2px solid #1976d2' : '1px solid #ccc',
                   background: activeGroup === g.id ? '#e3f2fd' : '#fff',
-                  cursor: 'pointer',
+                  cursor: 'pointer'
                 }}
               >
                 {g.name}
@@ -183,7 +188,7 @@ export default function TablePage({ params }) {
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-              gap: 8,
+              gap: 8
             }}
           >
             {items.map((it) => (
@@ -196,7 +201,7 @@ export default function TablePage({ params }) {
                   border: '1px solid #ddd',
                   textAlign: 'left',
                   cursor: 'pointer',
-                  background: '#fafafa',
+                  background: '#fafafa'
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{it.name}</div>
@@ -209,7 +214,6 @@ export default function TablePage({ params }) {
           </div>
         </div>
 
-        {/* Đơn hiện tại */}
         <div style={{ flex: 1 }}>
           <h4>Đơn hiện tại</h4>
           {groupedOrder.length === 0 && <div>Chưa có món nào.</div>}
@@ -240,7 +244,7 @@ export default function TablePage({ params }) {
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: 8,
+              marginBottom: 8
             }}
           >
             <div>
@@ -255,15 +259,12 @@ export default function TablePage({ params }) {
                 <option value="cash">Tiền mặt</option>
                 <option value="transfer">Chuyển khoản</option>
               </select>
-              <button
-                disabled={paying || !order || groupedOrder.length === 0}
-                onClick={handlePay}
-              >
+              <button disabled={paying || !order || groupedOrder.length === 0} onClick={handlePay}>
                 {paying ? 'Đang thanh toán...' : 'Thanh toán'}
               </button>
             </div>
           </div>
-          <small>Thanh toán xong sẽ lưu bill vào "Lịch sử hôm nay".</small>
+          <small>Thanh toán xong sẽ lưu bill vào &quot;Lịch sử hôm nay&quot;.</small>
         </div>
       </div>
     </main>
