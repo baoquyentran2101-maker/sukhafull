@@ -77,7 +77,7 @@ export default function HomePage() {
               borderRadius: 999,
               border: activeArea === a.id ? '2px solid #1976d2' : '1px solid #ccc',
               background: activeArea === a.id ? '#e3f2fd' : '#fff',
-              cursor: 'pointer',
+              cursor: 'pointer'
             }}
           >
             {a.name}
@@ -91,7 +91,7 @@ export default function HomePage() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
-          gap: 10,
+          gap: 10
         }}
       >
         {tables.map((t) => (
@@ -103,7 +103,7 @@ export default function HomePage() {
                 padding: '10px 6px',
                 textAlign: 'center',
                 background: statusColor(t.status),
-                cursor: 'pointer',
+                cursor: 'pointer'
               }}
             >
               <div style={{ fontWeight: 600 }}>{t.name}</div>
@@ -114,7 +114,7 @@ export default function HomePage() {
           </Link>
         ))}
         {!loadingTables && tables.length === 0 && (
-          <div>Chưa có bàn trong khu này. Vào "Quản lý Khu & Bàn" để tạo.</div>
+          <div>Chưa có bàn trong khu này. Vào &quot;Quản lý Khu &amp; Bàn&quot; để tạo.</div>
         )}
       </div>
     </main>
