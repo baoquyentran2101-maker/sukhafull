@@ -10,7 +10,7 @@ function startEndOfToday() {
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
   return {
     start: start.toISOString(),
-    end: end.toISOString()
+    end: end.toISOString(),
   };
 }
 
@@ -42,7 +42,7 @@ export default function TodayHistoryPage() {
 
     const merged = payments.map((p) => ({
       ...p,
-      table_name: orderMap.get(p.order_id)?.table_name || ''
+      table_name: orderMap.get(p.order_id)?.table_name || '',
     }));
     setRows(merged);
   }
@@ -81,7 +81,7 @@ export default function TodayHistoryPage() {
               <td style={{ padding: '4px 0' }}>
                 {new Date(r.paid_at).toLocaleTimeString('vi-VN', {
                   hour: '2-digit',
-                  minute: '2-digit'
+                  minute: '2-digit',
                 })}
               </td>
               <td>{r.table_name}</td>
