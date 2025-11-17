@@ -71,7 +71,7 @@ export default function OrderHistoryPage({ params }) {
               hour: '2-digit',
               minute: '2-digit',
               day: '2-digit',
-              month: '2-digit'
+              month: '2-digit',
             })}
           </div>
         </div>
@@ -82,7 +82,7 @@ export default function OrderHistoryPage({ params }) {
             Thanh toán:{' '}
             {new Date(payment.paid_at).toLocaleTimeString('vi-VN', {
               hour: '2-digit',
-              minute: '2-digit'
+              minute: '2-digit',
             })}
           </div>
           <div>Hình thức: {payment.method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản'}</div>
