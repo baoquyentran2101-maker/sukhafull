@@ -9,7 +9,7 @@ export default function RootLayout({ children }) {
         style={{
           margin: 0,
           fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-          background: '#f5f5f5'
+          background: '#f5f5f5',
         }}
       >
         <div
@@ -18,7 +18,7 @@ export default function RootLayout({ children }) {
             margin: '0 auto',
             minHeight: '100vh',
             background: '#fff',
-            boxShadow: '0 0 10px rgba(0,0,0,0.06)'
+            boxShadow: '0 0 10px rgba(0,0,0,0.06)',
           }}
         >
           <header
@@ -27,11 +27,11 @@ export default function RootLayout({ children }) {
               borderBottom: '1px solid #eee',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center'
+              alignItems: 'center',
             }}
           >
             <h2 style={{ margin: 0 }}>BQ Café POS</h2>
-            <small>Demo chạy bằng Next.js + Supabase</small>
+            <small>Demo Next.js + Supabase</small>
           </header>
           {children}
         </div>
