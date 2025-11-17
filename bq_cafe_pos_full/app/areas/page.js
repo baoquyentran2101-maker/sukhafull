@@ -51,7 +51,7 @@ export default function AreasPage() {
     await supabase.from('cafe_tables').insert({
       area_id: activeArea,
       name: newTableName.trim(),
-      status: 'empty'
+      status: 'empty',
     });
     setNewTableName('');
     await loadTables(activeArea);
@@ -60,6 +60,9 @@ export default function AreasPage() {
   return (
     <main style={{ padding: 16 }}>
       <h3>Quản lý khu &amp; bàn</h3>
+      <div style={{ marginBottom: 8 }}>
+        <a href="/"><button>Về màn hình chính</button></a>
+      </div>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
           <h4>Khu</h4>
@@ -73,7 +76,7 @@ export default function AreasPage() {
                   borderRadius: 999,
                   border: activeArea === a.id ? '2px solid #1976d2' : '1px solid #ccc',
                   background: activeArea === a.id ? '#e3f2fd' : '#fff',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
                 }}
               >
                 {a.name}
@@ -98,7 +101,7 @@ export default function AreasPage() {
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
               gap: 8,
-              marginBottom: 8
+              marginBottom: 8,
             }}
           >
             {tables.map((t) => (
@@ -109,7 +112,7 @@ export default function AreasPage() {
                   borderRadius: 8,
                   padding: 6,
                   textAlign: 'center',
-                  background: t.status === 'empty' ? '#e8fff0' : '#fff3e0'
+                  background: t.status === 'empty' ? '#e8fff0' : '#fff3e0',
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{t.name}</div>
