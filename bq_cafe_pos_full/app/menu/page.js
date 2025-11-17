@@ -54,7 +54,7 @@ export default function MenuPage() {
     await supabase.from('menu_items').insert({
       group_id: activeGroup,
       name: newItemName.trim(),
-      price,
+      price
     });
     setNewItemName('');
     setNewItemPrice('');
@@ -64,9 +64,6 @@ export default function MenuPage() {
   return (
     <main style={{ padding: 16 }}>
       <h3>Quản lý menu</h3>
-      <div style={{ marginBottom: 8 }}>
-        <a href="/"><button>Về màn hình chính</button></a>
-      </div>
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
           <h4>Nhóm món</h4>
@@ -80,7 +77,7 @@ export default function MenuPage() {
                   borderRadius: 999,
                   border: activeGroup === g.id ? '2px solid #1976d2' : '1px solid #ccc',
                   background: activeGroup === g.id ? '#e3f2fd' : '#fff',
-                  cursor: 'pointer',
+                  cursor: 'pointer'
                 }}
               >
                 {g.name}
@@ -108,7 +105,7 @@ export default function MenuPage() {
                   display: 'flex',
                   justifyContent: 'space-between',
                   padding: '4px 8px',
-                  borderBottom: '1px solid #eee',
+                  borderBottom: '1px solid #eee'
                 }}
               >
                 <span>{i.name}</span>
@@ -132,7 +129,7 @@ export default function MenuPage() {
             />
             <button type="submit">Thêm món</button>
           </form>
-          <small>SL & tiền chi tiết sẽ tính khi order tại màn hình bàn.</small>
+          <small>**Số lượng** sẽ chọn khi order ở màn hình bàn.</small>
         </div>
       </div>
     </main>
