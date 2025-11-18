@@ -140,7 +140,7 @@ export default function MenuPage() {
 
   // ===== UI =====
   return (
-    <main style={{ padding: 16 }}>
+    
   <main style={{ padding: 16 }}>
   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
     <h3 style={{ margin: 0 }}>Quản lý menu</h3>
