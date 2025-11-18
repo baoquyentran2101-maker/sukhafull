@@ -141,7 +141,25 @@ export default function MenuPage() {
   // ===== UI =====
   return (
     <main style={{ padding: 16 }}>
-      <h3>Quản lý menu</h3>
+  <main style={{ padding: 16 }}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+    <h3 style={{ margin: 0 }}>Quản lý menu</h3>
+
+    <button
+      onClick={() => window.location.href = '/'}
+      style={{
+        padding: '6px 12px',
+        background: '#1976d2',
+        color: 'white',
+        border: 'none',
+        borderRadius: 6,
+        cursor: 'pointer'
+      }}
+    >
+      ← Quay về chọn bàn
+    </button>
+  </div>
+
 
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
         {/* CỘT NHÓM MÓN */}
