@@ -17,6 +17,8 @@ export default function TablePage({ params }) {
   const [paying, setPaying] = useState(false);
   const [payMethod, setPayMethod] = useState('cash');
 
+  // ================== LOAD DATA ==================
+
   async function loadTable() {
     const { data } = await supabase
       .from('cafe_tables')
@@ -83,17 +85,30 @@ export default function TablePage({ params }) {
     if (activeGroup) loadItems(activeGroup);
   }, [activeGroup]);
 
+  // ================== TÍNH TOÁN ==================
+
   const orderTotal = useMemo(
     () =>
       orderItems.reduce((sum, it) => {
+        const qty = Number(it.qty || 0);
+        const price = Number(it.price || 0);
         const lineTotal =
-          it.amount != null
-            ? Number(it.amount)
-            : Number(it.price || 0) * Number(it.qty || 0);
+          it.amount != null ? Number(it.amount) : qty * price;
         return sum + lineTotal;
       }, 0),
     [orderItems]
   );
+
+  // Tìm 1 dòng order_items theo item_name + price
+  function findOrderItemByNameAndPrice(name, price) {
+    return orderItems.find(
+      (oi) =>
+        oi.item_name === name &&
+        Number(oi.price || 0) === Number(price || 0)
+    );
+  }
+
+  // ================== LOGIC ĐƠN HÀNG ==================
 
   async function ensureOrder() {
     if (order) return order;
@@ -116,66 +131,75 @@ export default function TablePage({ params }) {
     return null;
   }
 
-  // Thêm món hoặc +1 nếu đã có trong order
+  // Thêm món từ menu:
+  // - Nếu chưa có -> INSERT qty = 1
+  // - Nếu đã có   -> UPDATE qty + 1
   async function addItemToOrder(item) {
     const currentOrder = await ensureOrder();
     if (!currentOrder) return;
 
-    // Tìm món đã có trong order theo tên + giá
-    const existing = orderItems.find(
-      (oi) =>
-        oi.item_name === item.name &&
-        Number(oi.price || 0) === Number(item.price || 0)
-    );
+    const existing = findOrderItemByNameAndPrice(item.name, item.price);
+    const price = Number(item.price || 0);
 
-    if (existing) {
-      const newQty = Number(existing.qty || 0) + 1;
-      const newAmount = newQty * Number(existing.price || 0);
+    if (!existing) {
+      await supabase.from('order_items').insert({
+        order_id: currentOrder.id,
+        item_name: item.name,
+        price: price,
+        qty: 1,
+        amount: price
+      });
+    } else {
+      const currentQty = Number(existing.qty || 0);
+      const newQty = currentQty + 1;
+      const newAmount = newQty * price;
+
       await supabase
         .from('order_items')
         .update({ qty: newQty, amount: newAmount })
         .eq('id', existing.id);
-    } else {
-      await supabase.from('order_items').insert({
-        order_id: currentOrder.id,
-        item_name: item.name,
-        price: item.price,
-        qty: 1,
-        amount: Number(item.price || 0)
-      });
     }
 
     await loadOrderItems(currentOrder.id);
   }
 
-  // +1 ở phần Đơn hiện tại
+  // +1 số lượng (theo id dòng order_items)
   async function increaseOrderItem(oi) {
     if (!order) return;
-    const newQty = Number(oi.qty || 0) + 1;
-    const newAmount = newQty * Number(oi.price || 0);
+    const price = Number(oi.price || 0);
+    const currentQty = Number(oi.qty || 0);
+    const newQty = currentQty + 1;
+    const newAmount = newQty * price;
+
     await supabase
       .from('order_items')
       .update({ qty: newQty, amount: newAmount })
       .eq('id', oi.id);
+
     await loadOrderItems(order.id);
   }
 
-  // -1 ở phần Đơn hiện tại (về 0 thì xoá dòng)
+  // -1 số lượng, nếu về 0 thì xoá món luôn
   async function decreaseOrderItem(oi) {
     if (!order) return;
+    const price = Number(oi.price || 0);
     const currentQty = Number(oi.qty || 0);
+
     if (currentQty <= 1) {
       await supabase.from('order_items').delete().eq('id', oi.id);
     } else {
       const newQty = currentQty - 1;
-      const newAmount = newQty * Number(oi.price || 0);
+      const newAmount = newQty * price;
       await supabase
         .from('order_items')
         .update({ qty: newQty, amount: newAmount })
         .eq('id', oi.id);
     }
+
     await loadOrderItems(order.id);
   }
+
+  // ================== THANH TOÁN ==================
 
   async function handlePay() {
     if (!order || orderItems.length === 0 || orderTotal <= 0) return;
@@ -200,8 +224,11 @@ export default function TablePage({ params }) {
     }
   }
 
+  // ================== UI ==================
+
   return (
     <main style={{ padding: 16 }}>
+      {/* Header */}
       <div
         style={{
           display: 'flex',
@@ -217,7 +244,7 @@ export default function TablePage({ params }) {
       </div>
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        {/* Cột trái: chọn món */}
+        {/* Cột trái: Chọn món */}
         <div
           style={{
             flex: 1,
@@ -226,6 +253,8 @@ export default function TablePage({ params }) {
           }}
         >
           <h4>Chọn món</h4>
+
+          {/* Nhóm món */}
           <div
             style={{
               display: 'flex',
@@ -252,6 +281,7 @@ export default function TablePage({ params }) {
             ))}
           </div>
 
+          {/* Danh sách món */}
           <div
             style={{
               display: 'grid',
@@ -260,10 +290,9 @@ export default function TablePage({ params }) {
             }}
           >
             {items.map((it) => {
-              const existing = orderItems.find(
-                (oi) =>
-                  oi.item_name === it.name &&
-                  Number(oi.price || 0) === Number(it.price || 0)
+              const existing = findOrderItemByNameAndPrice(
+                it.name,
+                it.price
               );
 
               return (
@@ -327,7 +356,13 @@ export default function TablePage({ params }) {
                       >
                         -
                       </button>
-                      <span style={{ minWidth: 20, textAlign: 'center', fontSize: 13 }}>
+                      <span
+                        style={{
+                          minWidth: 20,
+                          textAlign: 'center',
+                          fontSize: 13
+                        }}
+                      >
                         {existing.qty}
                       </span>
                       <button
@@ -352,10 +387,11 @@ export default function TablePage({ params }) {
           </div>
         </div>
 
-        {/* Cột phải: đơn hiện tại */}
+        {/* Cột phải: Đơn hiện tại */}
         <div style={{ flex: 1 }}>
           <h4>Đơn hiện tại</h4>
           {orderItems.length === 0 && <div>Chưa có món nào.</div>}
+
           {orderItems.length > 0 && (
             <table
               style={{
@@ -377,7 +413,7 @@ export default function TablePage({ params }) {
                   </th>
                   <th
                     style={{
-                      textAlign: 'right',
+                      textAlign: 'center',
                       borderBottom: '1px solid #eee',
                       paddingBottom: 4
                     }}
@@ -397,19 +433,19 @@ export default function TablePage({ params }) {
               </thead>
               <tbody>
                 {orderItems.map((oi) => {
+                  const qty = Number(oi.qty || 0);
+                  const price = Number(oi.price || 0);
                   const lineTotal =
-                    oi.amount != null
-                      ? Number(oi.amount)
-                      : Number(oi.price || 0) * Number(oi.qty || 0);
+                    oi.amount != null ? Number(oi.amount) : qty * price;
 
                   return (
                     <tr key={oi.id}>
                       <td style={{ padding: '4px 0' }}>{oi.item_name}</td>
-                      <td style={{ textAlign: 'right', padding: '4px 0' }}>
+                      <td style={{ textAlign: 'center', padding: '4px 0' }}>
                         <div
                           style={{
                             display: 'flex',
-                            justifyContent: 'flex-end',
+                            justifyContent: 'center',
                             alignItems: 'center',
                             gap: 6
                           }}
@@ -453,47 +489,4 @@ export default function TablePage({ params }) {
                           </button>
                         </div>
                       </td>
-                      <td style={{ textAlign: 'right', padding: '4px 0' }}>
-                        {lineTotal.toLocaleString('vi-VN')} đ
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: 8
-            }}
-          >
-            <div>
-              <strong>Tổng: {orderTotal.toLocaleString('vi-VN')} đ</strong>
-            </div>
-            <div>
-              <select
-                value={payMethod}
-                onChange={(e) => setPayMethod(e.target.value)}
-                style={{ marginRight: 8 }}
-              >
-                <option value="cash">Tiền mặt</option>
-                <option value="transfer">Chuyển khoản</option>
-              </select>
-              <button
-                disabled={paying || !order || orderItems.length === 0}
-                onClick={handlePay}
-              >
-                {paying ? 'Đang thanh toán...' : 'Thanh toán'}
-              </button>
-            </div>
-          </div>
-          <small>Thanh toán xong sẽ lưu bill vào &quot;Lịch sử hôm nay&quot;.</small>
-        </div>
-      </div>
-    </main>
-  );
-}
+                      <td style={{ textAlign: 'right', padding
