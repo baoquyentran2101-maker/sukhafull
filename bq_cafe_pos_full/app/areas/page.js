@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
+import { useRouter } from 'next/navigation';  // ✅ thêm router
 
 export default function AreasPage() {
+  const router = useRouter(); // ✅ hook điều hướng
+
   const [areas, setAreas] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
   const [tables, setTables] = useState([]);
   const [newAreaName, setNewAreaName] = useState('');
   const [newTableName, setNewTableName] = useState('');
+  const [usingTables, setUsingTables] = useState([]); // tất cả bàn đang sử dụng
 
   async function loadAreas() {
     const { data } = await supabase
@@ -26,11 +30,24 @@ export default function AreasPage() {
       .select('id, name, status')
       .eq('area_id', areaId)
       .order('name', { ascending: true });
+
     setTables(data || []);
+  }
+
+  // Load tất cả bàn đang sử dụng (không phân khu)
+  async function loadUsingTables() {
+    const { data } = await supabase
+      .from('cafe_tables')
+      .select('id, name, status')
+      .eq('status', 'in_use')
+      .order('name', { ascending: true });
+
+    setUsingTables(data || []);
   }
 
   useEffect(() => {
     loadAreas();
+    loadUsingTables();
   }, []);
 
   useEffect(() => {
@@ -55,14 +72,18 @@ export default function AreasPage() {
     });
     setNewTableName('');
     await loadTables(activeArea);
+    await loadUsingTables();
   }
 
   return (
     <main style={{ padding: 16 }}>
       <h3>Quản lý khu &amp; bàn</h3>
+
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        {/* KHU */}
         <div style={{ flex: 1 }}>
           <h4>Khu</h4>
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
             {areas.map((a) => (
               <button
@@ -80,6 +101,7 @@ export default function AreasPage() {
               </button>
             ))}
           </div>
+
           <form onSubmit={addArea} style={{ display: 'flex', gap: 8 }}>
             <input
               placeholder="Tên khu mới..."
@@ -91,8 +113,10 @@ export default function AreasPage() {
           </form>
         </div>
 
+        {/* BÀN TRONG KHU */}
         <div style={{ flex: 1 }}>
           <h4>Bàn trong khu</h4>
+
           <div
             style={{
               display: 'grid',
@@ -113,10 +137,13 @@ export default function AreasPage() {
                 }}
               >
                 <div style={{ fontWeight: 600 }}>{t.name}</div>
-                <div style={{ fontSize: 12 }}>{t.status}</div>
+                <div style={{ fontSize: 12 }}>
+                  {t.status === 'in_use' ? 'Đang sử dụng' : 'Trống'}
+                </div>
               </div>
             ))}
           </div>
+
           <form onSubmit={addTable} style={{ display: 'flex', gap: 8 }}>
             <input
               placeholder="Tên bàn mới..."
@@ -127,6 +154,39 @@ export default function AreasPage() {
             <button type="submit">Thêm bàn</button>
           </form>
         </div>
+      </div>
+
+      {/* ============================
+          BLOCK RIÊNG: BÀN ĐANG SỬ DỤNG
+          ============================ */}
+      <div style={{ marginTop: 28 }}>
+        <h4>Tất cả bàn đang sử dụng</h4>
+
+        {usingTables.length === 0 ? (
+          <div style={{ fontSize: 13, color: '#777' }}>
+            Hiện chưa có bàn nào đang sử dụng.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+            {usingTables.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => router.push(`/table/${t.id}`)} // ✅ CLICK → NHẢY TỚI ORDER
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 999,
+                  background: '#fff3e0',
+                  border: '1px solid #ffb74d',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );
