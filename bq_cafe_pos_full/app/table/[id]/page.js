@@ -54,6 +54,7 @@ export default function TablePage({ params }) {
       .eq('status', 'open')
       .order('created_at', { ascending: false })
       .limit(1);
+
     if (data && data.length > 0) {
       setOrder(data[0]);
       await loadOrderItems(data[0].id);
@@ -82,31 +83,28 @@ export default function TablePage({ params }) {
     if (activeGroup) loadItems(activeGroup);
   }, [activeGroup]);
 
-  const groupedOrder = useMemo(() => {
-    const map = new Map();
-    for (const oi of orderItems) {
-      const key = oi.item_name;
-      const prev = map.get(key) || { name: key, qty: 0, total: 0, price: oi.price };
-      prev.qty += oi.qty;
-      prev.total += Number(oi.amount || oi.price * oi.qty || 0);
-      map.set(key, prev);
-    }
-    return Array.from(map.values());
-  }, [orderItems]);
-
   const orderTotal = useMemo(
-    () => groupedOrder.reduce((sum, it) => sum + it.total, 0),
-    [groupedOrder]
+    () =>
+      orderItems.reduce((sum, it) => {
+        const lineTotal =
+          it.amount != null
+            ? Number(it.amount)
+            : Number(it.price || 0) * Number(it.qty || 0);
+        return sum + lineTotal;
+      }, 0),
+    [orderItems]
   );
 
   async function ensureOrder() {
     if (order) return order;
+
     const tableName = table?.name || '';
     const { data, error } = await supabase
       .from('orders')
       .insert({ table_id: tableId, table_name: tableName, status: 'open' })
       .select('*')
       .single();
+
     if (!error) {
       setOrder(data);
       await supabase
@@ -118,20 +116,69 @@ export default function TablePage({ params }) {
     return null;
   }
 
+  // Thêm món hoặc +1 nếu đã có trong order
   async function addItemToOrder(item) {
     const currentOrder = await ensureOrder();
     if (!currentOrder) return;
-    await supabase.from('order_items').insert({
-      order_id: currentOrder.id,
-      item_name: item.name,
-      price: item.price,
-      qty: 1
-    });
+
+    // Tìm món đã có trong order theo tên + giá
+    const existing = orderItems.find(
+      (oi) =>
+        oi.item_name === item.name &&
+        Number(oi.price || 0) === Number(item.price || 0)
+    );
+
+    if (existing) {
+      const newQty = Number(existing.qty || 0) + 1;
+      const newAmount = newQty * Number(existing.price || 0);
+      await supabase
+        .from('order_items')
+        .update({ qty: newQty, amount: newAmount })
+        .eq('id', existing.id);
+    } else {
+      await supabase.from('order_items').insert({
+        order_id: currentOrder.id,
+        item_name: item.name,
+        price: item.price,
+        qty: 1,
+        amount: Number(item.price || 0)
+      });
+    }
+
     await loadOrderItems(currentOrder.id);
   }
 
+  // +1 ở phần Đơn hiện tại
+  async function increaseOrderItem(oi) {
+    if (!order) return;
+    const newQty = Number(oi.qty || 0) + 1;
+    const newAmount = newQty * Number(oi.price || 0);
+    await supabase
+      .from('order_items')
+      .update({ qty: newQty, amount: newAmount })
+      .eq('id', oi.id);
+    await loadOrderItems(order.id);
+  }
+
+  // -1 ở phần Đơn hiện tại (về 0 thì xoá dòng)
+  async function decreaseOrderItem(oi) {
+    if (!order) return;
+    const currentQty = Number(oi.qty || 0);
+    if (currentQty <= 1) {
+      await supabase.from('order_items').delete().eq('id', oi.id);
+    } else {
+      const newQty = currentQty - 1;
+      const newAmount = newQty * Number(oi.price || 0);
+      await supabase
+        .from('order_items')
+        .update({ qty: newQty, amount: newAmount })
+        .eq('id', oi.id);
+    }
+    await loadOrderItems(order.id);
+  }
+
   async function handlePay() {
-    if (!order || groupedOrder.length === 0 || orderTotal <= 0) return;
+    if (!order || orderItems.length === 0 || orderTotal <= 0) return;
     setPaying(true);
     try {
       await supabase.from('payments').insert({
@@ -155,7 +202,13 @@ export default function TablePage({ params }) {
 
   return (
     <main style={{ padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          marginBottom: 12
+        }}
+      >
         <div>
           <h3 style={{ margin: 0 }}>Bàn {table?.name || ''}</h3>
           <small>{table?.status === 'in_use' ? 'Đang sử dụng' : 'Trống'}</small>
@@ -164,9 +217,23 @@ export default function TablePage({ params }) {
       </div>
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, borderRight: '1px solid #eee', paddingRight: 8 }}>
+        {/* Cột trái: chọn món */}
+        <div
+          style={{
+            flex: 1,
+            borderRight: '1px solid #eee',
+            paddingRight: 8
+          }}
+        >
           <h4>Chọn món</h4>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 6,
+              marginBottom: 8
+            }}
+          >
             {groups.map((g) => (
               <button
                 key={g.id}
@@ -174,7 +241,8 @@ export default function TablePage({ params }) {
                 style={{
                   padding: '4px 8px',
                   borderRadius: 999,
-                  border: activeGroup === g.id ? '2px solid #1976d2' : '1px solid #ccc',
+                  border:
+                    activeGroup === g.id ? '2px solid #1976d2' : '1px solid #ccc',
                   background: activeGroup === g.id ? '#e3f2fd' : '#fff',
                   cursor: 'pointer'
                 }}
@@ -191,54 +259,210 @@ export default function TablePage({ params }) {
               gap: 8
             }}
           >
-            {items.map((it) => (
-              <button
-                key={it.id}
-                onClick={() => addItemToOrder(it)}
-                style={{
-                  padding: '8px 6px',
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  background: '#fafafa'
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{it.name}</div>
-                <div style={{ fontSize: 12 }}>
-                  {Number(it.price || 0).toLocaleString('vi-VN')} đ
+            {items.map((it) => {
+              const existing = orderItems.find(
+                (oi) =>
+                  oi.item_name === it.name &&
+                  Number(oi.price || 0) === Number(it.price || 0)
+              );
+
+              return (
+                <div
+                  key={it.id}
+                  style={{
+                    padding: '8px 6px',
+                    borderRadius: 8,
+                    border: '1px solid #ddd',
+                    background: '#fafafa',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 6
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{it.name}</div>
+                    <div style={{ fontSize: 12 }}>
+                      {Number(it.price || 0).toLocaleString('vi-VN')} đ
+                    </div>
+                  </div>
+
+                  {/* Nếu chưa có trong order: nút + Thêm, nếu có: - SL + */}
+                  {!existing ? (
+                    <button
+                      onClick={() => addItemToOrder(it)}
+                      style={{
+                        marginTop: 4,
+                        padding: '4px 6px',
+                        borderRadius: 6,
+                        border: 'none',
+                        background: '#1976d2',
+                        color: '#fff',
+                        fontSize: 12,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      + Thêm
+                    </button>
+                  ) : (
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginTop: 4
+                      }}
+                    >
+                      <button
+                        onClick={() => decreaseOrderItem(existing)}
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: '50%',
+                          border: '1px solid #1976d2',
+                          background: '#fff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        -
+                      </button>
+                      <span style={{ minWidth: 20, textAlign: 'center', fontSize: 13 }}>
+                        {existing.qty}
+                      </span>
+                      <button
+                        onClick={() => increaseOrderItem(existing)}
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: '50%',
+                          border: '1px solid #1976d2',
+                          background: '#fff',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </button>
-            ))}
+              );
+            })}
             {items.length === 0 && <div>Không có món trong nhóm này.</div>}
           </div>
         </div>
 
+        {/* Cột phải: đơn hiện tại */}
         <div style={{ flex: 1 }}>
           <h4>Đơn hiện tại</h4>
-          {groupedOrder.length === 0 && <div>Chưa có món nào.</div>}
-          {groupedOrder.length > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 8 }}>
+          {orderItems.length === 0 && <div>Chưa có món nào.</div>}
+          {orderItems.length > 0 && (
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                marginBottom: 8
+              }}
+            >
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'left', borderBottom: '1px solid #eee' }}>Món</th>
-                  <th style={{ textAlign: 'right', borderBottom: '1px solid #eee' }}>SL</th>
-                  <th style={{ textAlign: 'right', borderBottom: '1px solid #eee' }}>Tiền</th>
+                  <th
+                    style={{
+                      textAlign: 'left',
+                      borderBottom: '1px solid #eee',
+                      paddingBottom: 4
+                    }}
+                  >
+                    Món
+                  </th>
+                  <th
+                    style={{
+                      textAlign: 'right',
+                      borderBottom: '1px solid #eee',
+                      paddingBottom: 4
+                    }}
+                  >
+                    SL
+                  </th>
+                  <th
+                    style={{
+                      textAlign: 'right',
+                      borderBottom: '1px solid #eee',
+                      paddingBottom: 4
+                    }}
+                  >
+                    Tiền
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {groupedOrder.map((it) => (
-                  <tr key={it.name}>
-                    <td style={{ padding: '4px 0' }}>{it.name}</td>
-                    <td style={{ textAlign: 'right' }}>{it.qty}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {it.total.toLocaleString('vi-VN')} đ
-                    </td>
-                  </tr>
-                ))}
+                {orderItems.map((oi) => {
+                  const lineTotal =
+                    oi.amount != null
+                      ? Number(oi.amount)
+                      : Number(oi.price || 0) * Number(oi.qty || 0);
+
+                  return (
+                    <tr key={oi.id}>
+                      <td style={{ padding: '4px 0' }}>{oi.item_name}</td>
+                      <td style={{ textAlign: 'right', padding: '4px 0' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            alignItems: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <button
+                            onClick={() => decreaseOrderItem(oi)}
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: '50%',
+                              border: '1px solid #1976d2',
+                              background: '#fff',
+                              cursor: 'pointer',
+                              fontSize: 12
+                            }}
+                          >
+                            -
+                          </button>
+                          <span
+                            style={{
+                              minWidth: 20,
+                              textAlign: 'center',
+                              fontSize: 13
+                            }}
+                          >
+                            {oi.qty}
+                          </span>
+                          <button
+                            onClick={() => increaseOrderItem(oi)}
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: '50%',
+                              border: '1px solid #1976d2',
+                              background: '#fff',
+                              cursor: 'pointer',
+                              fontSize: 12
+                            }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '4px 0' }}>
+                        {lineTotal.toLocaleString('vi-VN')} đ
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
+
           <div
             style={{
               display: 'flex',
@@ -259,7 +483,10 @@ export default function TablePage({ params }) {
                 <option value="cash">Tiền mặt</option>
                 <option value="transfer">Chuyển khoản</option>
               </select>
-              <button disabled={paying || !order || groupedOrder.length === 0} onClick={handlePay}>
+              <button
+                disabled={paying || !order || orderItems.length === 0}
+                onClick={handlePay}
+              >
                 {paying ? 'Đang thanh toán...' : 'Thanh toán'}
               </button>
             </div>
