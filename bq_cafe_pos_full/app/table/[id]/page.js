@@ -17,45 +17,58 @@ export default function TablePage({ params }) {
   const [paying, setPaying] = useState(false);
   const [payMethod, setPayMethod] = useState('cash');
 
-  // ================== LOAD DATA ==================
+  // ===== LOAD DATA =====
 
   async function loadTable() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('cafe_tables')
       .select('*')
       .eq('id', tableId)
       .single();
+    if (error) {
+      console.error('loadTable error:', error);
+    }
     setTable(data);
   }
 
   async function loadGroupsAndItems() {
-    const { data: g } = await supabase
+    const { data: g, error } = await supabase
       .from('menu_groups')
       .select('id, name, sort')
       .order('sort', { ascending: true });
+    if (error) {
+      console.error('loadGroups error:', error);
+    }
     setGroups(g || []);
     if (g && g.length > 0 && !activeGroup) setActiveGroup(g[0].id);
   }
 
   async function loadItems(groupId) {
     if (!groupId) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('menu_items')
       .select('id, name, price')
       .eq('group_id', groupId)
       .eq('is_active', true)
       .order('sort', { ascending: true });
+    if (error) {
+      console.error('loadItems error:', error);
+    }
     setItems(data || []);
   }
 
   async function loadOpenOrder() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orders')
       .select('*')
       .eq('table_id', tableId)
       .eq('status', 'open')
       .order('created_at', { ascending: false })
       .limit(1);
+
+    if (error) {
+      console.error('loadOpenOrder error:', error);
+    }
 
     if (data && data.length > 0) {
       setOrder(data[0]);
@@ -67,11 +80,14 @@ export default function TablePage({ params }) {
   }
 
   async function loadOrderItems(orderId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('order_items')
-      .select('id, item_name, price, qty, amount')
+      .select('id, item_name, price, qty, amount, created_at')
       .eq('order_id', orderId)
       .order('created_at', { ascending: true });
+    if (error) {
+      console.error('loadOrderItems error:', error);
+    }
     setOrderItems(data || []);
   }
 
@@ -85,132 +101,156 @@ export default function TablePage({ params }) {
     if (activeGroup) loadItems(activeGroup);
   }, [activeGroup]);
 
-  // ================== TÍNH TOÁN ==================
+  // ===== GOM NHÓM ĐƠN HÀNG / TÍNH TỔNG =====
+
+  const groupedOrder = useMemo(() => {
+    const map = new Map();
+    for (const oi of orderItems) {
+      const key = oi.item_name;
+      const prev =
+        map.get(key) || {
+          name: key,
+          qty: 0,
+          total: 0,
+          price: oi.price
+        };
+      const qty = Number(oi.qty || 0);
+      const lineTotal =
+        oi.amount != null
+          ? Number(oi.amount)
+          : Number(oi.price || 0) * qty;
+
+      prev.qty += qty;
+      prev.total += lineTotal;
+      prev.price = oi.price;
+      map.set(key, prev);
+    }
+    return Array.from(map.values());
+  }, [orderItems]);
 
   const orderTotal = useMemo(
-    () =>
-      orderItems.reduce((sum, it) => {
-        const qty = Number(it.qty || 0);
-        const price = Number(it.price || 0);
-        const lineTotal =
-          it.amount != null ? Number(it.amount) : qty * price;
-        return sum + lineTotal;
-      }, 0),
-    [orderItems]
+    () => groupedOrder.reduce((sum, it) => sum + it.total, 0),
+    [groupedOrder]
   );
 
-  // Tìm 1 dòng order_items theo item_name + price
-  function findOrderItemByNameAndPrice(name, price) {
-    return orderItems.find(
+  // Tìm 1 dòng order_items theo (tên + giá) trong state hiện tại
+  function findOneOrderItem(name, price) {
+    const matches = orderItems.filter(
       (oi) =>
         oi.item_name === name &&
         Number(oi.price || 0) === Number(price || 0)
     );
+    if (matches.length === 0) return null;
+    // lấy dòng mới nhất (created_at lớn nhất)
+    return matches[matches.length - 1];
   }
 
-  // ================== LOGIC ĐƠN HÀNG ==================
+  // ===== LOGIC ORDER =====
 
   async function ensureOrder() {
     if (order) return order;
-
     const tableName = table?.name || '';
+
     const { data, error } = await supabase
       .from('orders')
       .insert({ table_id: tableId, table_name: tableName, status: 'open' })
       .select('*')
       .single();
 
-    if (!error) {
-      setOrder(data);
-      await supabase
-        .from('cafe_tables')
-        .update({ status: 'in_use' })
-        .eq('id', tableId);
-      return data;
+    if (error) {
+      console.error('ensureOrder error:', error);
+      return null;
     }
-    return null;
+
+    setOrder(data);
+    await supabase
+      .from('cafe_tables')
+      .update({ status: 'in_use' })
+      .eq('id', tableId);
+    return data;
   }
 
-  // Thêm món từ menu:
-  // - Nếu chưa có -> INSERT qty = 1
-  // - Nếu đã có   -> UPDATE qty + 1
+  // === THÊM MÓN (giữ nguyên logic gốc của bạn) ===
   async function addItemToOrder(item) {
     const currentOrder = await ensureOrder();
     if (!currentOrder) return;
 
-    const existing = findOrderItemByNameAndPrice(item.name, item.price);
-    const price = Number(item.price || 0);
+    const { error } = await supabase.from('order_items').insert({
+      order_id: currentOrder.id,
+      item_name: item.name,
+      price: item.price,
+      qty: 1
+    });
 
-    if (!existing) {
-      await supabase.from('order_items').insert({
-        order_id: currentOrder.id,
-        item_name: item.name,
-        price: price,
-        qty: 1,
-        amount: price
-      });
-    } else {
-      const currentQty = Number(existing.qty || 0);
-      const newQty = currentQty + 1;
-      const newAmount = newQty * price;
-
-      await supabase
-        .from('order_items')
-        .update({ qty: newQty, amount: newAmount })
-        .eq('id', existing.id);
+    if (error) {
+      console.error('addItemToOrder error:', error);
+      return;
     }
 
     await loadOrderItems(currentOrder.id);
   }
 
-  // +1 số lượng (theo id dòng order_items)
-  async function increaseOrderItem(oi) {
-    if (!order) return;
-    const price = Number(oi.price || 0);
-    const currentQty = Number(oi.qty || 0);
-    const newQty = currentQty + 1;
-    const newAmount = newQty * price;
-
-    await supabase
-      .from('order_items')
-      .update({ qty: newQty, amount: newAmount })
-      .eq('id', oi.id);
-
-    await loadOrderItems(order.id);
+  // +1 số lượng cho 1 món (dùng lại addItemToOrder)
+  async function handleIncrease(name, price) {
+    // Tạo object giả giống item menu
+    await addItemToOrder({ name, price });
   }
 
-  // -1 số lượng, nếu về 0 thì xoá món luôn
-  async function decreaseOrderItem(oi) {
+  // -1 số lượng cho 1 món; nếu về 0 thì xoá món
+  async function handleDecrease(name, price) {
     if (!order) return;
-    const price = Number(oi.price || 0);
-    const currentQty = Number(oi.qty || 0);
+
+    const target = findOneOrderItem(name, price);
+    if (!target) return;
+
+    const currentQty = Number(target.qty || 0) || 1;
 
     if (currentQty <= 1) {
-      await supabase.from('order_items').delete().eq('id', oi.id);
-    } else {
-      const newQty = currentQty - 1;
-      const newAmount = newQty * price;
-      await supabase
+      const { error } = await supabase
         .from('order_items')
-        .update({ qty: newQty, amount: newAmount })
-        .eq('id', oi.id);
+        .delete()
+        .eq('id', target.id);
+      if (error) {
+        console.error('handleDecrease delete error:', error);
+      }
+    } else {
+      const { error } = await supabase
+        .from('order_items')
+        .update({ qty: currentQty - 1 })
+        .eq('id', target.id);
+      if (error) {
+        console.error('handleDecrease update error:', error);
+      }
     }
 
     await loadOrderItems(order.id);
   }
 
-  // ================== THANH TOÁN ==================
+  // ===== THANH TOÁN =====
 
   async function handlePay() {
-    if (!order || orderItems.length === 0 || orderTotal <= 0) return;
+    if (!order || groupedOrder.length === 0 || orderTotal <= 0) return;
     setPaying(true);
     try {
-      await supabase.from('payments').insert({
+      const { error: payError } = await supabase.from('payments').insert({
         order_id: order.id,
         method: payMethod,
         paid_amount: orderTotal
       });
-      await supabase.from('orders').update({ status: 'paid' }).eq('id', order.id);
+      if (payError) {
+        console.error('insert payment error:', payError);
+        return;
+      }
+
+      const { error: orderErr } = await supabase
+        .from('orders')
+        .update({ status: 'paid' })
+        .eq('id', order.id);
+      if (orderErr) {
+        console.error('update order paid error:', orderErr);
+        return;
+      }
+
       await supabase
         .from('cafe_tables')
         .update({ status: 'empty' })
@@ -224,7 +264,7 @@ export default function TablePage({ params }) {
     }
   }
 
-  // ================== UI ==================
+  // ===== UI =====
 
   return (
     <main style={{ padding: 16 }}>
@@ -290,9 +330,10 @@ export default function TablePage({ params }) {
             }}
           >
             {items.map((it) => {
-              const existing = findOrderItemByNameAndPrice(
-                it.name,
-                it.price
+              const grouped = groupedOrder.find(
+                (go) =>
+                  go.name === it.name &&
+                  Number(go.price || 0) === Number(it.price || 0)
               );
 
               return (
@@ -316,8 +357,8 @@ export default function TablePage({ params }) {
                     </div>
                   </div>
 
-                  {/* Nếu chưa có trong order: nút + Thêm, nếu có: - SL + */}
-                  {!existing ? (
+                  {/* Nếu chưa có -> + Thêm; nếu có -> - SL + */}
+                  {!grouped ? (
                     <button
                       onClick={() => addItemToOrder(it)}
                       style={{
@@ -344,7 +385,9 @@ export default function TablePage({ params }) {
                       }}
                     >
                       <button
-                        onClick={() => decreaseOrderItem(existing)}
+                        onClick={() =>
+                          handleDecrease(grouped.name, grouped.price)
+                        }
                         style={{
                           width: 24,
                           height: 24,
@@ -363,10 +406,12 @@ export default function TablePage({ params }) {
                           fontSize: 13
                         }}
                       >
-                        {existing.qty}
+                        {grouped.qty}
                       </span>
                       <button
-                        onClick={() => increaseOrderItem(existing)}
+                        onClick={() =>
+                          handleIncrease(grouped.name, grouped.price)
+                        }
                         style={{
                           width: 24,
                           height: 24,
@@ -390,9 +435,9 @@ export default function TablePage({ params }) {
         {/* Cột phải: Đơn hiện tại */}
         <div style={{ flex: 1 }}>
           <h4>Đơn hiện tại</h4>
-          {orderItems.length === 0 && <div>Chưa có món nào.</div>}
+          {groupedOrder.length === 0 && <div>Chưa có món nào.</div>}
 
-          {orderItems.length > 0 && (
+          {groupedOrder.length > 0 && (
             <table
               style={{
                 width: '100%',
@@ -432,61 +477,102 @@ export default function TablePage({ params }) {
                 </tr>
               </thead>
               <tbody>
-                {orderItems.map((oi) => {
-                  const qty = Number(oi.qty || 0);
-                  const price = Number(oi.price || 0);
-                  const lineTotal =
-                    oi.amount != null ? Number(oi.amount) : qty * price;
-
-                  return (
-                    <tr key={oi.id}>
-                      <td style={{ padding: '4px 0' }}>{oi.item_name}</td>
-                      <td style={{ textAlign: 'center', padding: '4px 0' }}>
-                        <div
+                {groupedOrder.map((it) => (
+                  <tr key={`${it.name}-${it.price}`}>
+                    <td style={{ padding: '4px 0' }}>{it.name}</td>
+                    <td style={{ textAlign: 'center', padding: '4px 0' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          gap: 6
+                        }}
+                      >
+                        <button
+                          onClick={() =>
+                            handleDecrease(it.name, it.price)
+                          }
                           style={{
-                            display: 'flex',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            gap: 6
+                            width: 22,
+                            height: 22,
+                            borderRadius: '50%',
+                            border: '1px solid #1976d2',
+                            background: '#fff',
+                            cursor: 'pointer',
+                            fontSize: 12
                           }}
                         >
-                          <button
-                            onClick={() => decreaseOrderItem(oi)}
-                            style={{
-                              width: 22,
-                              height: 22,
-                              borderRadius: '50%',
-                              border: '1px solid #1976d2',
-                              background: '#fff',
-                              cursor: 'pointer',
-                              fontSize: 12
-                            }}
-                          >
-                            -
-                          </button>
-                          <span
-                            style={{
-                              minWidth: 20,
-                              textAlign: 'center',
-                              fontSize: 13
-                            }}
-                          >
-                            {oi.qty}
-                          </span>
-                          <button
-                            onClick={() => increaseOrderItem(oi)}
-                            style={{
-                              width: 22,
-                              height: 22,
-                              borderRadius: '50%',
-                              border: '1px solid #1976d2',
-                              background: '#fff',
-                              cursor: 'pointer',
-                              fontSize: 12
-                            }}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: 'right', padding
+                          -
+                        </button>
+                        <span
+                          style={{
+                            minWidth: 20,
+                            textAlign: 'center',
+                            fontSize: 13
+                          }}
+                        >
+                          {it.qty}
+                        </span>
+                        <button
+                          onClick={() =>
+                            handleIncrease(it.name, it.price)
+                          }
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: '50%',
+                            border: '1px solid #1976d2',
+                            background: '#fff',
+                            cursor: 'pointer',
+                            fontSize: 12
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '4px 0' }}>
+                      {it.total.toLocaleString('vi-VN')} đ
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Tổng & thanh toán */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 8
+            }}
+          >
+            <div>
+              <strong>Tổng: {orderTotal.toLocaleString('vi-VN')} đ</strong>
+            </div>
+            <div>
+              <select
+                value={payMethod}
+                onChange={(e) => setPayMethod(e.target.value)}
+                style={{ marginRight: 8 }}
+              >
+                <option value="cash">Tiền mặt</option>
+                <option value="transfer">Chuyển khoản</option>
+              </select>
+              <button
+                disabled={paying || !order || groupedOrder.length === 0}
+                onClick={handlePay}
+              >
+                {paying ? 'Đang thanh toán...' : 'Thanh toán'}
+              </button>
+            </div>
+          </div>
+          <small>Thanh toán xong sẽ lưu bill vào &quot;Lịch sử hôm nay&quot;.</small>
+        </div>
+      </div>
+    </main>
+  );
+}
