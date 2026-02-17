@@ -17,8 +17,12 @@ export default function OrderHistoryDetailPage({ params }) {
     let alive = true;
 
     async function load() {
-      setLoading(true);
-      setErrMsg('');
+      if (!orderId) return;
+
+      if (alive) {
+        setLoading(true);
+        setErrMsg('');
+      }
 
       try {
         // 1) Order
@@ -30,7 +34,7 @@ export default function OrderHistoryDetailPage({ params }) {
 
         if (oErr) throw oErr;
 
-        // 2) Latest payment (nếu paid_at null vẫn lấy record mới nhất theo id)
+        // 2) Latest payment (paid_at có thể null => order thêm theo id)
         const { data: p, error: pErr } = await supabase
           .from('payments')
           .select('*')
@@ -45,9 +49,11 @@ export default function OrderHistoryDetailPage({ params }) {
         setOrder(o || null);
         setPayment(p?.[0] || null);
       } catch (e) {
-        console.error('load history order detail error:', e);
+        console.error('OrderHistoryDetail load error:', e);
         if (!alive) return;
         setErrMsg('Không tải được dữ liệu. Vui lòng kiểm tra lại.');
+        setOrder(null);
+        setPayment(null);
       } finally {
         if (alive) setLoading(false);
       }
@@ -101,7 +107,14 @@ export default function OrderHistoryDetailPage({ params }) {
       {!payment && <div>Đơn này chưa có thanh toán.</div>}
 
       {payment && (
-        <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 10, background: '#fafafa' }}>
+        <div
+          style={{
+            border: '1px solid #eee',
+            padding: 12,
+            borderRadius: 10,
+            background: '#fafafa'
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ fontWeight: 700 }}>Tạm tính</div>
             <div style={{ fontWeight: 700 }}>
@@ -110,13 +123,18 @@ export default function OrderHistoryDetailPage({ params }) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div>
-              Phí dịch vụ ({Number(payment.service_percent || 0)}%)
-            </div>
+            <div>Phí dịch vụ ({Number(payment.service_percent || 0)}%)</div>
             <div>{Number(payment.service_amount || 0).toLocaleString('vi-VN')} đ</div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #ddd', paddingTop: 10 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              borderTop: '1px dashed #ddd',
+              paddingTop: 10
+            }}
+          >
             <div style={{ fontWeight: 900 }}>Tổng thanh toán</div>
             <div style={{ fontWeight: 900, fontSize: 16 }}>
               {Number(payment.paid_amount || 0).toLocaleString('vi-VN')} đ
