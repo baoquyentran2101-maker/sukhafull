@@ -1,121 +1,153 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { supabase } from '../lib/supabaseClient';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../../lib/supabaseClient';
 
-export default function HomePage() {
-  const [areas, setAreas] = useState([]);
-  const [activeArea, setActiveArea] = useState(null);
-  const [tables, setTables] = useState([]);
-  const [loadingAreas, setLoadingAreas] = useState(true);
-  const [loadingTables, setLoadingTables] = useState(false);
+export default function TablePage({ params }) {
+  const tableId = params.id;
+  const router = useRouter();
 
-  async function loadAreas() {
-    setLoadingAreas(true);
-    const { data, error } = await supabase
-      .from('areas')
-      .select('id, name, sort')
-      .order('sort', { ascending: true });
+  // ===== DATA =====
+  const [table, setTable] = useState(null);
+  const [order, setOrder] = useState(null);
+  const [orderItems, setOrderItems] = useState([]);
 
-    if (!error && data) {
-      setAreas(data);
-      if (!activeArea && data.length > 0) setActiveArea(data[0].id);
+  // ===== POS =====
+  const [serviceEnabled, setServiceEnabled] = useState(true);
+  const [servicePercent, setServicePercent] = useState(5);
+  const [payMethod, setPayMethod] = useState('cash');
+  const [paying, setPaying] = useState(false);
+
+  // ---------- LOAD ----------
+  async function loadOpenOrder() {
+    const { data } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('table_id', tableId)
+      .eq('status', 'open')
+      .limit(1);
+
+    if (data?.length) {
+      setOrder(data[0]);
+      loadOrderItems(data[0].id);
     }
-    setLoadingAreas(false);
   }
 
-  async function loadTables(areaId) {
-    if (!areaId) return;
-    setLoadingTables(true);
-    const { data, error } = await supabase
-      .from('cafe_tables')
-      .select('id, name, status')
-      .eq('area_id', areaId)
-      .order('name', { ascending: true });
-    if (!error && data) setTables(data);
-    setLoadingTables(false);
+  async function loadOrderItems(orderId) {
+    const { data } = await supabase
+      .from('order_items')
+      .select('id, item_name, price, qty')
+      .eq('order_id', orderId);
+
+    setOrderItems(data || []);
   }
 
   useEffect(() => {
-    loadAreas();
+    loadOpenOrder();
   }, []);
 
-  useEffect(() => {
-    if (activeArea) loadTables(activeArea);
-  }, [activeArea]);
+  // ---------- CALC ----------
+  const subTotal = useMemo(() => {
+    return orderItems.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 0), 0);
+  }, [orderItems]);
 
-  const statusColor = (status) => {
-    if (status === 'empty') return '#e8fff0';
-    if (status === 'in_use') return '#fff3e0';
-    return '#eeeeee';
-  };
+  const serviceAmount = useMemo(() => {
+    if (!serviceEnabled) return 0;
+    return Math.round((subTotal * Number(servicePercent || 0)) / 100);
+  }, [subTotal, serviceEnabled, servicePercent]);
 
+  const finalTotal = useMemo(() => {
+    return subTotal + serviceAmount;
+  }, [subTotal, serviceAmount]);
+
+  // ---------- PAY ----------
+  async function handlePay() {
+    if (!order || finalTotal <= 0) return;
+
+    setPaying(true);
+
+    await supabase.from('payments').insert({
+      order_id: order.id,
+      method: payMethod,
+      sub_total: subTotal,
+      service_percent: serviceEnabled ? Number(servicePercent) : 0,
+      service_amount: serviceAmount,
+      paid_amount: finalTotal
+    });
+
+    await supabase.from('orders').update({ status: 'paid' }).eq('id', order.id);
+    await supabase.from('cafe_tables').update({ status: 'empty' }).eq('id', tableId);
+
+    setPaying(false);
+    router.push('/history/today');
+  }
+
+  // ---------- UI ----------
   return (
     <main style={{ padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div>
-          <h3 style={{ margin: '0 0 4px' }}>Chọn khu &amp; bàn</h3>
-          <small>Khu A, B, C, D và khu Mang về.</small>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Link href="/menu"><button>Quản lý Menu</button></Link>
-          <Link href="/areas"><button>Quản lý Khu &amp; Bàn</button></Link>
-          <Link href="/history/today"><button>Lịch sử hôm nay</button></Link>
-        </div>
+      <h3>Order</h3>
+
+      {/* Order list */}
+      <div style={{ marginBottom: 20 }}>
+        {orderItems.map((it) => (
+          <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div>{it.item_name} x{it.qty}</div>
+            <div>{(it.price * it.qty).toLocaleString('vi-VN')} đ</div>
+          </div>
+        ))}
       </div>
 
-      {loadingAreas && <div>Đang tải khu vực...</div>}
+      {/* POS BREAKDOWN */}
+      <div style={{ border: '1px solid #eee', padding: 12, borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <strong>Tạm tính</strong>
+          <strong>{subTotal.toLocaleString('vi-VN')} đ</strong>
+        </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-        {areas.map((a) => (
+        <div style={{ marginTop: 10 }}>
+          <input
+            type="checkbox"
+            checked={serviceEnabled}
+            onChange={(e) => setServiceEnabled(e.target.checked)}
+          />
+          <span style={{ marginLeft: 6 }}>Phí dịch vụ</span>
+
+          {serviceEnabled && (
+            <input
+              type="number"
+              value={servicePercent}
+              onChange={(e) => setServicePercent(e.target.value)}
+              style={{ width: 60, marginLeft: 10 }}
+            />
+          )}
+          {serviceEnabled && <span>%</span>}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+          <div>Phí dịch vụ</div>
+          <div>{serviceAmount.toLocaleString('vi-VN')} đ</div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+          <strong>Tổng thanh toán</strong>
+          <strong>{finalTotal.toLocaleString('vi-VN')} đ</strong>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+            <option value="cash">Tiền mặt</option>
+            <option value="transfer">Chuyển khoản</option>
+          </select>
+
           <button
-            key={a.id}
-            onClick={() => setActiveArea(a.id)}
-            style={{
-              padding: '6px 10px',
-              borderRadius: 999,
-              border: activeArea === a.id ? '2px solid #1976d2' : '1px solid #ccc',
-              background: activeArea === a.id ? '#e3f2fd' : '#fff',
-              cursor: 'pointer'
-            }}
+            onClick={handlePay}
+            disabled={paying}
+            style={{ marginLeft: 10 }}
           >
-            {a.name}
+            {paying ? 'Đang thanh toán...' : 'Thanh toán'}
           </button>
-        ))}
-      </div>
-
-      {loadingTables && <div>Đang tải bàn...</div>}
-
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
-          gap: 10
-        }}
-      >
-        {tables.map((t) => (
-          <Link key={t.id} href={`/table/${t.id}`}>
-            <div
-              style={{
-                border: '1px solid #ddd',
-                borderRadius: 10,
-                padding: '10px 6px',
-                textAlign: 'center',
-                background: statusColor(t.status),
-                cursor: 'pointer'
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>{t.name}</div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                {t.status === 'empty' ? 'empty' : 'in_use'}
-              </div>
-            </div>
-          </Link>
-        ))}
-        {!loadingTables && tables.length === 0 && (
-          <div>Chưa có bàn trong khu này. Vào &quot;Quản lý Khu &amp; Bàn&quot; để tạo.</div>
-        )}
+        </div>
       </div>
     </main>
   );
