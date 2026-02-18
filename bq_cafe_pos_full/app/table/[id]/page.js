@@ -20,9 +20,10 @@ export default function TablePage({ params }) {
   const [orderItems, setOrderItems] = useState([]);
 
   // ===== POS =====
+  // service fee: only 20% quick or custom input
   const [serviceEnabled, setServiceEnabled] = useState(true);
-  const [servicePercent, setServicePercent] = useState(5);
-  const [servicePercentBackup, setServicePercentBackup] = useState(5);
+  const [servicePercent, setServicePercent] = useState(20);
+  const [servicePercentBackup, setServicePercentBackup] = useState(20);
 
   const [payMethod, setPayMethod] = useState('cash');
   const [paying, setPaying] = useState(false);
@@ -164,7 +165,7 @@ export default function TablePage({ params }) {
     );
   }
 
-  // chuẩn POS: 1 món = 1 dòng, update qty; qty=0 => delete
+  // POS: 1 item = 1 row, update qty; qty=0 => delete
   async function changeQtyBy(name, price, delta) {
     setErrMsg('');
     const currentOrder = await ensureOrderOpen();
@@ -263,7 +264,9 @@ export default function TablePage({ params }) {
       router.push('/history/today');
     } catch (e) {
       console.error('handlePay error:', e);
-      setErrMsg('Không thanh toán được. Kiểm tra bảng payments đã có đủ cột sub_total/service_percent/service_amount.');
+      setErrMsg(
+        'Không thanh toán được. Kiểm tra bảng payments đã có đủ cột sub_total/service_percent/service_amount.'
+      );
     } finally {
       setPaying(false);
     }
@@ -280,10 +283,13 @@ export default function TablePage({ params }) {
 
   return (
     <main style={{ padding: 16 }}>
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
         <div>
           <h3 style={{ margin: 0 }}>Bàn {table?.name || ''}</h3>
-          <div style={{ fontSize: 12, color: '#666' }}>{table?.status === 'in_use' ? 'Đang sử dụng' : 'Trống'}</div>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {table?.status === 'in_use' ? 'Đang sử dụng' : 'Trống'}
+          </div>
         </div>
         <button onClick={() => router.push('/')}>Về chọn bàn</button>
       </div>
@@ -291,7 +297,7 @@ export default function TablePage({ params }) {
       {errMsg && <div style={{ marginBottom: 10, color: '#b00020', fontSize: 13 }}>{errMsg}</div>}
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        {/* LEFT */}
+        {/* LEFT: Menu */}
         <div style={{ flex: 1, borderRight: '1px solid #eee', paddingRight: 10 }}>
           <h4 style={{ marginTop: 0 }}>Chọn món</h4>
 
@@ -336,7 +342,7 @@ export default function TablePage({ params }) {
           </div>
         </div>
 
-        {/* RIGHT */}
+        {/* RIGHT: Order + POS */}
         <div style={{ flex: 1 }}>
           <h4 style={{ marginTop: 0 }}>Đơn hiện tại</h4>
 
@@ -367,6 +373,7 @@ export default function TablePage({ params }) {
                     <button
                       onClick={() => changeQtyBy(it.item_name, it.price, -1)}
                       style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer' }}
+                      title="Giảm"
                     >
                       -
                     </button>
@@ -374,6 +381,7 @@ export default function TablePage({ params }) {
                     <button
                       onClick={() => changeQtyBy(it.item_name, it.price, +1)}
                       style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #ddd', cursor: 'pointer' }}
+                      title="Tăng"
                     >
                       +
                     </button>
@@ -383,69 +391,93 @@ export default function TablePage({ params }) {
             </div>
           )}
 
-          {/* POS breakdown + phí dịch vụ ngay trong order */}
+          {/* POS breakdown + service fee */}
           <div style={{ border: '1px solid #eee', borderRadius: 10, padding: 12, background: '#fafafa' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <div style={{ fontWeight: 900 }}>Tạm tính</div>
               <div style={{ fontWeight: 900 }}>{fmtVND(subTotal)}</div>
             </div>
 
+            {/* Service fee: only 20% or custom */}
             <div style={{ marginTop: 10 }}>
-  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-    <input
-      type="checkbox"
-      checked={serviceEnabled}
-      onChange={(e) => {
-        const on = e.target.checked;
-        setServiceEnabled(on);
-        if (!on) setServicePercent(0);
-        else setServicePercent(servicePercentBackup > 0 ? servicePercentBackup : 20);
-      }}
-    />
-    <span style={{ fontWeight: 800 }}>Phí dịch vụ</span>
-  </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={serviceEnabled}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setServiceEnabled(on);
+                    if (!on) setServicePercent(0);
+                    else setServicePercent(servicePercentBackup > 0 ? servicePercentBackup : 20);
+                  }}
+                />
+                <span style={{ fontWeight: 800 }}>Phí dịch vụ</span>
+              </label>
 
-  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-    {/* Quick 20% */}
-    <button
-      type="button"
-      onClick={() => {
-        setServiceEnabled(true);
-        setServicePercent(20);
-        setServicePercentBackup(20);
-      }}
-      style={{
-        padding: '6px 12px',
-        borderRadius: 999,
-        border: '1px solid #ddd',
-        cursor: 'pointer',
-        background: serviceEnabled && Number(servicePercent) === 20 ? '#e3f2fd' : '#fff',
-        fontWeight: 800
-      }}
-    >
-      20%
-    </button>
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setServiceEnabled(true);
+                    setServicePercent(20);
+                    setServicePercentBackup(20);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    border: '1px solid #ddd',
+                    cursor: 'pointer',
+                    background: serviceEnabled && Number(servicePercent) === 20 ? '#e3f2fd' : '#fff',
+                    fontWeight: 800
+                  }}
+                >
+                  20%
+                </button>
 
-    {/* Custom input */}
-    <span style={{ marginLeft: 6 }}>Tự nhập:</span>
-    <input
-      type="number"
-      min="0"
-      step="0.5"
-      value={serviceEnabled ? servicePercent : 0}
-      onChange={(e) => {
-        const v = e.target.value;
-        setServiceEnabled(true);
-        setServicePercent(v);
-        setServicePercentBackup(Number(v || 0));
-      }}
-      disabled={!serviceEnabled}
-      style={{ width: 90, padding: 6, borderRadius: 8, border: '1px solid #ddd' }}
-      placeholder="0"
-    />
-    <span>%</span>
-  </div>
-</div>
+                <span style={{ marginLeft: 6 }}>Tự nhập:</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={serviceEnabled ? servicePercent : 0}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setServiceEnabled(true);
+                    setServicePercent(v);
+                    setServicePercentBackup(Number(v || 0));
+                  }}
+                  disabled={!serviceEnabled}
+                  style={{ width: 90, padding: 6, borderRadius: 8, border: '1px solid #ddd' }}
+                  placeholder="0"
+                />
+                <span>%</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10 }}>
+              <div>Phí dịch vụ ({effServicePercent}%)</div>
+              <div>{fmtVND(serviceAmount)}</div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: 12,
+                borderTop: '1px dashed #ddd',
+                paddingTop: 10
+              }}
+            >
+              <div style={{ fontWeight: 900, fontSize: 16 }}>Tổng thanh toán</div>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>{fmtVND(finalTotal)}</div>
+            </div>
+
+            <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                <option value="cash">Tiền mặt</option>
+                <option value="transfer">Chuyển khoản</option>
+              </select>
+
               <button
                 onClick={handlePay}
                 disabled={paying || !order?.id || finalTotal <= 0}
