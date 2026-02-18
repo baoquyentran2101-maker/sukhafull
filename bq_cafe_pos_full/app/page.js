@@ -199,3 +199,6 @@ export default function HomePage() {
     </main>
   );
 }
+<button onClick={() => router.push('/menu')}>
+  Quản lý Menu
+</button>
