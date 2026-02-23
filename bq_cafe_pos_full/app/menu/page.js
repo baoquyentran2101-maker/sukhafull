@@ -100,31 +100,28 @@ export default function MenuManagerPage() {
   }, [activeGroupId]);
 
   // ---------- actions: groups ----------
-  async function addGroup(e) {
-    e.preventDefault();
-    const name = newGroupName.trim();
-    if (!name) return;
+ async function addGroup(e) {
+  e.preventDefault();
+  const name = newGroupName.trim();
+  if (!name) return;
 
-    setSaving(true);
-    setErrMsg('');
-    try {
-      const sort = (groups?.[groups.length - 1]?.sort ?? groups.length) + 1;
+  setErrMsg('');
 
-      const { error } = await supabase.from('menu_groups').insert({
-        name,
-        sort
-      });
-      if (error) throw error;
+  const { error } = await supabase
+    .from('menu_groups')
+    .insert({ name })   // ✅ không cần sort nếu bạn làm A1/A2
+    .select()
+    .single();
 
-      setNewGroupName('');
-      await loadGroups();
-    } catch (e2) {
-      console.error('addGroup error:', e2);
-      setErrMsg('Không thêm được nhóm. Kiểm tra quyền RLS / policy.');
-    } finally {
-      setSaving(false);
-    }
+  if (error) {
+    console.error('addGroup error:', error);
+    setErrMsg(`Không thêm được nhóm: ${error.message}`);
+    return;
   }
+
+  setNewGroupName('');
+  await loadGroups();
+}
 
   function startEditGroup(g) {
     setEditingGroupId(g.id);
@@ -191,39 +188,30 @@ export default function MenuManagerPage() {
 
   // ---------- actions: items ----------
   async function addItem(e) {
-    e.preventDefault();
-    const name = newItemName.trim();
-    const price = Number(newItemPrice || 0);
+  e.preventDefault();
+  const name = newItemName.trim();
+  const price = Number(newItemPrice);
 
-    if (!activeGroupId) {
-      setErrMsg('Hãy chọn nhóm trước khi thêm món.');
-      return;
-    }
-    if (!name) return;
+  if (!activeGroupId || !name || !Number.isFinite(price) || price <= 0) return;
 
-    setSaving(true);
-    setErrMsg('');
-    try {
-      const sort = (items?.[items.length - 1]?.sort ?? items.length) + 1;
+  setErrMsg('');
 
-      const { error } = await supabase.from('menu_items').insert({
-        group_id: activeGroupId,
-        name,
-        price,
-        sort,
-        is_active: true
-      });
-      if (error) throw error;
+  const { error } = await supabase
+    .from('menu_items')
+    .insert({ group_id: activeGroupId, name, price }) // ✅ sort tự xử lý
+    .select()
+    .single();
 
-      setNewItemName('');
-      setNewItemPrice('');
-      await loadItems(activeGroupId);
-    } catch (e) {
-      console.error('addItem error:', e);
-      setErrMsg('Không thêm được món.');
-    } finally {
-      setSaving(false);
-    }
+  if (error) {
+    console.error('addItem error:', error);
+    setErrMsg(`Không thêm được món: ${error.message}`);
+    return;
+  }
+
+  setNewItemName('');
+  setNewItemPrice('');
+  await loadItems(activeGroupId);
+}
   }
 
   function startEditItem(it) {
