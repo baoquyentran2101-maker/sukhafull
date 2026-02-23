@@ -5,6 +5,18 @@ import { supabase } from '../../lib/supabaseClient';
 
 const fmtVND = (n) => Number(n || 0).toLocaleString('vi-VN') + ' đ';
 
+function supaErrText(err) {
+  if (!err) return '';
+  // Supabase PostgrestError thường có: message, details, hint, code
+  const parts = [
+    err.message ? `message: ${err.message}` : '',
+    err.details ? `details: ${err.details}` : '',
+    err.hint ? `hint: ${err.hint}` : '',
+    err.code ? `code: ${err.code}` : ''
+  ].filter(Boolean);
+  return parts.join(' | ');
+}
+
 export default function MenuManagerPage() {
   // ===== data =====
   const [groups, setGroups] = useState([]);
@@ -35,16 +47,28 @@ export default function MenuManagerPage() {
   );
 
   // ---------- loaders ----------
-  async function loadGroups() {
+  async function loadGroups(nextActiveId) {
+    // ✅ menu_groups của bạn chỉ có: id, sort, name
     const { data, error } = await supabase
       .from('menu_groups')
-      .select('id, name, sort, created_at')
-      .order('sort', { ascending: true });
+      .select('id, name, sort')
+      .order('sort', { ascending: true })
+      .order('id', { ascending: true });
 
     if (error) throw error;
 
-    setGroups(data || []);
-    if (!activeGroupId && data?.length) setActiveGroupId(data[0].id);
+    const list = data || [];
+    setGroups(list);
+
+    // Giữ activeGroupId hợp lệ
+    const candidate =
+      nextActiveId ||
+      (activeGroupId && list.some((g) => g.id === activeGroupId) ? activeGroupId : null) ||
+      list[0]?.id ||
+      null;
+
+    setActiveGroupId(candidate);
+    return candidate;
   }
 
   async function loadItems(groupId) {
@@ -53,14 +77,22 @@ export default function MenuManagerPage() {
       return;
     }
 
+    // ⚠️ Tránh select cột không chắc tồn tại (created_at)
     const { data, error } = await supabase
       .from('menu_items')
-      .select('id, group_id, name, price, sort, is_active, created_at')
+      .select('id, group_id, name, price, sort, is_active')
       .eq('group_id', groupId)
-      .order('sort', { ascending: true });
+      .order('sort', { ascending: true })
+      .order('id', { ascending: true });
 
     if (error) throw error;
     setItems(data || []);
+  }
+
+  async function reloadAll() {
+    setErrMsg('');
+    const gid = await loadGroups();
+    await loadItems(gid);
   }
 
   useEffect(() => {
@@ -69,14 +101,16 @@ export default function MenuManagerPage() {
       try {
         setLoading(true);
         setErrMsg('');
-        await loadGroups();
+        const gid = await loadGroups();
+        await loadItems(gid);
       } catch (e) {
-        console.error('loadGroups error:', e);
-        if (alive) setErrMsg('Không tải được menu_groups.');
+        console.error('init load error:', e);
+        if (alive) setErrMsg(`Không tải được menu. ${supaErrText(e)}`);
       } finally {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -91,7 +125,7 @@ export default function MenuManagerPage() {
         await loadItems(activeGroupId);
       } catch (e) {
         console.error('loadItems error:', e);
-        if (alive) setErrMsg('Không tải được menu_items.');
+        if (alive) setErrMsg(`Không tải được menu_items. ${supaErrText(e)}`);
       }
     })();
     return () => {
@@ -100,28 +134,38 @@ export default function MenuManagerPage() {
   }, [activeGroupId]);
 
   // ---------- actions: groups ----------
- async function addGroup(e) {
-  e.preventDefault();
-  const name = newGroupName.trim();
-  if (!name) return;
+  async function addGroup(e) {
+    e.preventDefault();
+    const name = newGroupName.trim();
+    if (!name) return;
 
-  setErrMsg('');
+    setSaving(true);
+    setErrMsg('');
 
-  const { error } = await supabase
-    .from('menu_groups')
-    .insert({ name })   // ✅ không cần sort nếu bạn làm A1/A2
-    .select()
-    .single();
+    try {
+      // sort tăng theo max hiện tại (đã order theo sort)
+      const lastSort = groups.length ? Number(groups[groups.length - 1]?.sort || 0) : 0;
+      const sort = lastSort + 1;
 
-  if (error) {
-    console.error('addGroup error:', error);
-    setErrMsg(`Không thêm được nhóm: ${error.message}`);
-    return;
+      const { error } = await supabase.from('menu_groups').insert({ name, sort });
+      if (error) throw error;
+
+      setNewGroupName('');
+      const gid = await loadGroups(); // giữ selection
+      await loadItems(gid);
+    } catch (e2) {
+      console.error('addGroup error:', e2);
+
+      // ✅ show lỗi thật để biết là RLS hay thiếu cột / NOT NULL / grant...
+      const t = supaErrText(e2);
+      setErrMsg(
+        `Không thêm được nhóm. ${t || ''}\n` +
+          `Gợi ý: nếu thấy "row-level security" => thiếu policy/GRANT. Nếu thấy "null value in column sort" => cột sort đang NOT NULL nhưng insert thiếu sort/default/trigger.`
+      );
+    } finally {
+      setSaving(false);
+    }
   }
-
-  setNewGroupName('');
-  await loadGroups();
-}
 
   function startEditGroup(g) {
     setEditingGroupId(g.id);
@@ -140,18 +184,15 @@ export default function MenuManagerPage() {
     setSaving(true);
     setErrMsg('');
     try {
-      const { error } = await supabase
-        .from('menu_groups')
-        .update({ name })
-        .eq('id', editingGroupId);
-
+      const { error } = await supabase.from('menu_groups').update({ name }).eq('id', editingGroupId);
       if (error) throw error;
 
-      await loadGroups();
+      const gid = await loadGroups(activeGroupId);
+      await loadItems(gid);
       cancelEditGroup();
     } catch (e) {
       console.error('saveEditGroup error:', e);
-      setErrMsg('Không cập nhật được tên nhóm.');
+      setErrMsg(`Không cập nhật được tên nhóm. ${supaErrText(e)}`);
     } finally {
       setSaving(false);
     }
@@ -159,7 +200,7 @@ export default function MenuManagerPage() {
 
   async function deleteGroup(groupId) {
     if (!groupId) return;
-    const ok = confirm('Xoá nhóm này? (Món trong nhóm sẽ bị xoá theo)');
+    const ok = confirm('Xoá nhóm này? (Món trong nhóm sẽ bị xoá theo nếu bạn có ON DELETE CASCADE)');
     if (!ok) return;
 
     setSaving(true);
@@ -168,19 +209,13 @@ export default function MenuManagerPage() {
       const { error } = await supabase.from('menu_groups').delete().eq('id', groupId);
       if (error) throw error;
 
-      // reset selection if needed
-      const nextGroups = groups.filter((g) => g.id !== groupId);
-      setGroups(nextGroups);
-
-      const nextActive = nextGroups[0]?.id || null;
-      setActiveGroupId(nextActive);
-      if (nextActive) await loadItems(nextActive);
-      else setItems([]);
-
+      // reload sạch để selection đúng
+      const gid = await loadGroups();
+      await loadItems(gid);
       cancelEditGroup();
     } catch (e) {
       console.error('deleteGroup error:', e);
-      setErrMsg('Không xoá được nhóm.');
+      setErrMsg(`Không xoá được nhóm. ${supaErrText(e)}`);
     } finally {
       setSaving(false);
     }
@@ -188,30 +223,40 @@ export default function MenuManagerPage() {
 
   // ---------- actions: items ----------
   async function addItem(e) {
-  e.preventDefault();
-  const name = newItemName.trim();
-  const price = Number(newItemPrice);
+    e.preventDefault();
+    const name = newItemName.trim();
+    const price = Number(newItemPrice || 0);
 
-  if (!activeGroupId || !name || !Number.isFinite(price) || price <= 0) return;
+    if (!activeGroupId) {
+      setErrMsg('Hãy chọn nhóm trước khi thêm món.');
+      return;
+    }
+    if (!name) return;
 
-  setErrMsg('');
+    setSaving(true);
+    setErrMsg('');
+    try {
+      const lastSort = items.length ? Number(items[items.length - 1]?.sort || 0) : 0;
+      const sort = lastSort + 1;
 
-  const { error } = await supabase
-    .from('menu_items')
-    .insert({ group_id: activeGroupId, name, price }) // ✅ sort tự xử lý
-    .select()
-    .single();
+      const { error } = await supabase.from('menu_items').insert({
+        group_id: activeGroupId,
+        name,
+        price,
+        sort,
+        is_active: true
+      });
+      if (error) throw error;
 
-  if (error) {
-    console.error('addItem error:', error);
-    setErrMsg(`Không thêm được món: ${error.message}`);
-    return;
-  }
-
-  setNewItemName('');
-  setNewItemPrice('');
-  await loadItems(activeGroupId);
-}
+      setNewItemName('');
+      setNewItemPrice('');
+      await loadItems(activeGroupId);
+    } catch (e2) {
+      console.error('addItem error:', e2);
+      setErrMsg(`Không thêm được món. ${supaErrText(e2)}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function startEditItem(it) {
@@ -236,18 +281,14 @@ export default function MenuManagerPage() {
     setSaving(true);
     setErrMsg('');
     try {
-      const { error } = await supabase
-        .from('menu_items')
-        .update({ name, price })
-        .eq('id', editingItemId);
-
+      const { error } = await supabase.from('menu_items').update({ name, price }).eq('id', editingItemId);
       if (error) throw error;
 
       await loadItems(activeGroupId);
       cancelEditItem();
     } catch (e) {
       console.error('saveEditItem error:', e);
-      setErrMsg('Không cập nhật được món.');
+      setErrMsg(`Không cập nhật được món. ${supaErrText(e)}`);
     } finally {
       setSaving(false);
     }
@@ -257,16 +298,13 @@ export default function MenuManagerPage() {
     setSaving(true);
     setErrMsg('');
     try {
-      const { error } = await supabase
-        .from('menu_items')
-        .update({ is_active: !it.is_active })
-        .eq('id', it.id);
+      const { error } = await supabase.from('menu_items').update({ is_active: !it.is_active }).eq('id', it.id);
       if (error) throw error;
 
       await loadItems(activeGroupId);
     } catch (e) {
       console.error('toggleItemActive error:', e);
-      setErrMsg('Không bật/tắt được món.');
+      setErrMsg(`Không bật/tắt được món. ${supaErrText(e)}`);
     } finally {
       setSaving(false);
     }
@@ -286,7 +324,7 @@ export default function MenuManagerPage() {
       if (editingItemId === itemId) cancelEditItem();
     } catch (e) {
       console.error('deleteItem error:', e);
-      setErrMsg('Không xoá được món.');
+      setErrMsg(`Không xoá được món. ${supaErrText(e)}`);
     } finally {
       setSaving(false);
     }
@@ -297,10 +335,24 @@ export default function MenuManagerPage() {
     <main style={{ padding: 16, maxWidth: 1100, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
         <h3 style={{ margin: 0 }}>Quản lý Menu</h3>
-        <div style={{ fontSize: 12, color: '#666' }}>{saving ? 'Đang lưu...' : ''}</div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            onClick={reloadAll}
+            disabled={loading || saving}
+            style={{ border: '1px solid #ddd', borderRadius: 8, padding: '6px 10px' }}
+          >
+            Tải lại
+          </button>
+          <div style={{ fontSize: 12, color: '#666' }}>{saving ? 'Đang lưu...' : ''}</div>
+        </div>
       </div>
 
-      {errMsg && <div style={{ marginTop: 10, color: '#b00020' }}>{errMsg}</div>}
+      {errMsg && (
+        <div style={{ marginTop: 10, color: '#b00020', whiteSpace: 'pre-wrap' }}>
+          {errMsg}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ marginTop: 12 }}>Đang tải...</div>
@@ -310,9 +362,6 @@ export default function MenuManagerPage() {
           <div style={{ width: 340, border: '1px solid #eee', borderRadius: 10, padding: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <h4 style={{ margin: 0 }}>Nhóm món</h4>
-              <button onClick={loadGroups} style={{ border: '1px solid #ddd', borderRadius: 8, padding: '6px 10px' }}>
-                Tải lại
-              </button>
             </div>
 
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -349,12 +398,14 @@ export default function MenuManagerPage() {
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button
                             onClick={() => startEditGroup(g)}
+                            disabled={saving}
                             style={{ border: '1px solid #ddd', borderRadius: 8, padding: '6px 10px' }}
                           >
                             Sửa
                           </button>
                           <button
                             onClick={() => deleteGroup(g.id)}
+                            disabled={saving}
                             style={{ border: '1px solid #f3c2c2', borderRadius: 8, padding: '6px 10px' }}
                           >
                             Xoá
@@ -415,7 +466,11 @@ export default function MenuManagerPage() {
               <h4 style={{ margin: 0 }}>
                 Món trong nhóm: <span style={{ color: '#1976d2' }}>{activeGroup?.name || '-'}</span>
               </h4>
-              <button onClick={() => loadItems(activeGroupId)} style={{ border: '1px solid #ddd', borderRadius: 8, padding: '6px 10px' }}>
+              <button
+                onClick={() => loadItems(activeGroupId)}
+                disabled={saving}
+                style={{ border: '1px solid #ddd', borderRadius: 8, padding: '6px 10px' }}
+              >
                 Tải lại
               </button>
             </div>
