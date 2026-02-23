@@ -1,8 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
+
+function fmtVND(n) {
+  return Number(n || 0).toLocaleString('vi-VN') + ' đ';
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -10,125 +14,153 @@ export default function HomePage() {
   const [areas, setAreas] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
   const [tables, setTables] = useState([]);
-  const [inUseTables, setInUseTables] = useState([]);
+  const [busyTables, setBusyTables] = useState([]);
 
-  const [loading, setLoading] = useState(true);
-  const [errMsg, setErrMsg] = useState('');
+  const [loadingAreas, setLoadingAreas] = useState(true);
+  const [loadingTables, setLoadingTables] = useState(true);
+  const [loadingBusy, setLoadingBusy] = useState(true);
+  const [err, setErr] = useState('');
 
-  // ===== LOAD AREAS =====
   async function loadAreas() {
+    setLoadingAreas(true);
+    setErr('');
     const { data, error } = await supabase
       .from('areas')
-      .select('*')
+      .select('id,name,sort')
       .order('sort', { ascending: true });
 
-    if (error) throw error;
-
-    setAreas(data || []);
-    if (!activeArea && data?.length) {
-      setActiveArea(data[0].id);
+    if (error) {
+      console.error('loadAreas error:', error);
+      setErr(error.message);
+      setAreas([]);
+      setActiveArea(null);
+    } else {
+      setAreas(data || []);
+      if (!activeArea && data?.length) setActiveArea(data[0].id);
     }
+    setLoadingAreas(false);
   }
 
-  // ===== LOAD TABLES IN AREA =====
   async function loadTables(areaId) {
-    if (!areaId) return;
-
+    if (!areaId) {
+      setTables([]);
+      return;
+    }
+    setLoadingTables(true);
+    setErr('');
     const { data, error } = await supabase
       .from('cafe_tables')
-      .select('*')
+      .select('id,name,status')
       .eq('area_id', areaId)
       .order('name', { ascending: true });
 
-    if (error) throw error;
-
-    setTables(data || []);
+    if (error) {
+      console.error('loadTables error:', error);
+      setErr(error.message);
+      setTables([]);
+    } else {
+      setTables(data || []);
+    }
+    setLoadingTables(false);
   }
 
-  // ===== LOAD IN USE TABLES =====
-  async function loadInUseTables() {
+  async function loadBusyTables() {
+    setLoadingBusy(true);
+    setErr('');
     const { data, error } = await supabase
       .from('cafe_tables')
-      .select('*')
+      .select('id,name,status')
       .eq('status', 'in_use')
       .order('name', { ascending: true });
 
-    if (error) throw error;
-
-    setInUseTables(data || []);
+    if (error) {
+      console.error('loadBusyTables error:', error);
+      setErr(error.message);
+      setBusyTables([]);
+    } else {
+      setBusyTables(data || []);
+    }
+    setLoadingBusy(false);
   }
 
   useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      try {
-        setLoading(true);
-        setErrMsg('');
-
-        await loadAreas();
-        await loadInUseTables();
-      } catch (e) {
-        console.error('Home load error:', e);
-        if (alive) setErrMsg('Không tải được dữ liệu.');
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
+    loadAreas();
+    loadBusyTables();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     loadTables(activeArea);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeArea]);
 
-  if (loading) {
-    return (
-      <main style={{ padding: 16 }}>
-        <div>Đang tải...</div>
-      </main>
-    );
-  }
+  const areaName = useMemo(() => {
+    const a = areas.find((x) => x.id === activeArea);
+    return a?.name || '';
+  }, [areas, activeArea]);
 
   return (
     <main style={{ padding: 16 }}>
-      <h3 style={{ marginTop: 0 }}>POS - Chọn bàn</h3>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>BQ Cafe POS</h3>
+          <div style={{ fontSize: 12, color: '#666' }}>Chọn bàn để vào order</div>
+        </div>
 
-      {errMsg && (
-        <div style={{ color: 'red', marginBottom: 10 }}>
-          {errMsg}
+        {/* ✅ Nút phải nằm trong return JSX (đây là chỗ bạn bị đặt sai trước đó) */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button onClick={() => router.push('/menu')}>Quản lý Menu</button>
+          <button onClick={() => router.push('/areas')}>Khu &amp; Bàn</button>
+          <button onClick={() => router.push('/history/today')}>Lịch sử hôm nay</button>
+        </div>
+      </div>
+
+      {err && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            borderRadius: 8,
+            background: '#fff3f3',
+            border: '1px solid #ffd6d6',
+            color: '#b00020',
+            fontSize: 13
+          }}
+        >
+          Lỗi: {err}
         </div>
       )}
 
-      {/* ===== BÀN ĐANG SỬ DỤNG ===== */}
-      <div
-        style={{
-          border: '1px solid #eee',
-          borderRadius: 8,
-          padding: 12,
-          marginBottom: 20,
-          background: '#fafafa'
-        }}
-      >
-        <h4>Bàn đang sử dụng</h4>
+      {/* Busy tables block */}
+      <div style={{ marginTop: 14, border: '1px solid #eee', borderRadius: 10, padding: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <h4 style={{ margin: 0 }}>Bàn đang sử dụng</h4>
+          <button onClick={loadBusyTables} disabled={loadingBusy}>
+            {loadingBusy ? 'Đang tải...' : 'Tải lại'}
+          </button>
+        </div>
 
-        {inUseTables.length === 0 && <div>Không có bàn nào.</div>}
+        {loadingBusy && <div style={{ marginTop: 8, fontSize: 13, color: '#666' }}>Đang tải...</div>}
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {inUseTables.map((t) => (
+        {!loadingBusy && busyTables.length === 0 && (
+          <div style={{ marginTop: 8, fontSize: 13, color: '#666' }}>Không có bàn nào đang sử dụng.</div>
+        )}
+
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {busyTables.map((t) => (
             <button
               key={t.id}
               onClick={() => router.push(`/table/${t.id}`)}
               style={{
-                padding: '6px 12px',
-                borderRadius: 20,
-                border: '1px solid #ddd',
+                padding: '8px 10px',
+                borderRadius: 999,
+                border: '1px solid #ffd59a',
+                background: '#fff7ed',
                 cursor: 'pointer',
-                background: '#fff3e0'
+                fontWeight: 700
               }}
+              title="Vào order"
             >
               {t.name}
             </button>
@@ -136,73 +168,83 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* ===== KHU ===== */}
-      <div style={{ marginBottom: 20 }}>
-        <h4>Khu</h4>
-        <div style={{ display: 'flex', gap: 8 }}>
+      {/* Areas */}
+      <div style={{ marginTop: 14, border: '1px solid #eee', borderRadius: 10, padding: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <h4 style={{ margin: 0 }}>Khu</h4>
+          <button onClick={loadAreas} disabled={loadingAreas}>
+            {loadingAreas ? 'Đang tải...' : 'Tải lại'}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {areas.map((a) => (
             <button
               key={a.id}
               onClick={() => setActiveArea(a.id)}
               style={{
-                padding: '6px 12px',
-                borderRadius: 20,
-                border: activeArea === a.id ? '2px solid #1976d2' : '1px solid #ccc',
-                cursor: 'pointer'
+                padding: '6px 10px',
+                borderRadius: 999,
+                border: activeArea === a.id ? '2px solid #1976d2' : '1px solid #ddd',
+                background: activeArea === a.id ? '#e3f2fd' : '#fff',
+                cursor: 'pointer',
+                fontWeight: 700
               }}
             >
               {a.name}
             </button>
           ))}
+          {!loadingAreas && areas.length === 0 && (
+            <div style={{ fontSize: 13, color: '#666' }}>Chưa có khu nào.</div>
+          )}
         </div>
       </div>
 
-      {/* ===== BÀN TRONG KHU ===== */}
-      <div>
-        <h4>Bàn trong khu</h4>
+      {/* Tables */}
+      <div style={{ marginTop: 14, border: '1px solid #eee', borderRadius: 10, padding: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <h4 style={{ margin: 0 }}>Bàn trong khu {areaName ? `(${areaName})` : ''}</h4>
+          <button onClick={() => loadTables(activeArea)} disabled={loadingTables || !activeArea}>
+            {loadingTables ? 'Đang tải...' : 'Tải lại'}
+          </button>
+        </div>
+
+        {loadingTables && <div style={{ marginTop: 8, fontSize: 13, color: '#666' }}>Đang tải...</div>}
+
+        {!loadingTables && tables.length === 0 && (
+          <div style={{ marginTop: 8, fontSize: 13, color: '#666' }}>Không có bàn trong khu này.</div>
+        )}
 
         <div
           style={{
+            marginTop: 10,
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
             gap: 10
           }}
         >
-          {tables.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => router.push(`/table/${t.id}`)}
-              style={{
-                padding: 12,
-                borderRadius: 8,
-                border: '1px solid #ddd',
-                cursor: 'pointer',
-                background: t.status === 'empty' ? '#e8fff0' : '#fff3e0'
-              }}
-            >
-              <div style={{ fontWeight: 700 }}>{t.name}</div>
-              <div style={{ fontSize: 12 }}>
-                {t.status === 'empty' ? 'Trống' : 'Đang dùng'}
-              </div>
-            </button>
-          ))}
+          {tables.map((t) => {
+            const isEmpty = t.status === 'empty';
+            return (
+              <button
+                key={t.id}
+                onClick={() => router.push(`/table/${t.id}`)}
+                style={{
+                  padding: 10,
+                  borderRadius: 10,
+                  border: '1px solid #ddd',
+                  background: isEmpty ? '#e8fff0' : '#fff3e0',
+                  cursor: 'pointer',
+                  textAlign: 'left'
+                }}
+                title="Vào order"
+              >
+                <div style={{ fontWeight: 800 }}>{t.name}</div>
+                <div style={{ fontSize: 12, color: '#666' }}>{t.status}</div>
+              </button>
+            );
+          })}
         </div>
-      </div>
-
-      {/* ===== NÚT QUẢN LÝ MENU ===== */}
-      <div style={{ marginTop: 30 }}>
-        <button
-          onClick={() => router.push('/menu')}
-          style={{
-            padding: '10px 16px',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            cursor: 'pointer',
-            fontWeight: 600
-          }}
-        >
-          Quản lý Menu
-        </button>
       </div>
     </main>
   );
