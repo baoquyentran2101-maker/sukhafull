@@ -53,6 +53,7 @@ export default function TablePage({ params }) {
 
   async function voidOrder(orderId) {
     if (!orderId) return;
+
     // Nếu DB bạn không có status "void" -> đổi thành "cancelled" hoặc comment dòng này.
     const { error } = await supabase.from('orders').update({ status: 'void' }).eq('id', orderId);
     if (error) console.error('voidOrder error:', error);
@@ -200,17 +201,17 @@ export default function TablePage({ params }) {
       const { error: nErr } = await supabase.from('cafe_tables').update({ status: 'in_use' }).eq('id', newTable.id);
       if (nErr) throw nErr;
 
-      // 3) set bàn cũ empty (vì đơn đã chuyển đi)
+      // 3) set bàn cũ empty
       const { error: oldTErr } = await supabase.from('cafe_tables').update({ status: 'empty' }).eq('id', tableId);
       if (oldTErr) console.error('set old table empty error:', oldTErr);
 
-      // 4) chuyển qua bàn mới
+      // 4) chuyển qua route bàn mới
       setMoveOpen(false);
       setMoveToTableId('');
       router.push(`/table/${newTable.id}`);
     } catch (e) {
       console.error('moveOrderToTable error:', e);
-      setErrMsg(`Không đổi bàn được: ${e.message || 'Lỗi không xác định'}`);
+      setErrMsg(`Không đổi bàn được: ${e?.message || 'Lỗi không xác định'}`);
     } finally {
       setMoving(false);
     }
@@ -373,10 +374,7 @@ export default function TablePage({ params }) {
     return p < 0 ? 0 : p;
   }, [serviceEnabled, servicePercent]);
 
-  const serviceAmount = useMemo(
-    () => Math.round((subTotal * effServicePercent) / 100),
-    [subTotal, effServicePercent]
-  );
+  const serviceAmount = useMemo(() => Math.round((subTotal * effServicePercent) / 100), [subTotal, effServicePercent]);
 
   const finalTotal = useMemo(() => Math.round(subTotal + serviceAmount), [subTotal, serviceAmount]);
 
