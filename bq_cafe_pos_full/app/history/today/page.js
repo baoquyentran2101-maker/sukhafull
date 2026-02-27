@@ -6,212 +6,137 @@ import { supabase } from '../../../lib/supabaseClient';
 
 const fmtVND = (n) => Number(n || 0).toLocaleString('vi-VN') + ' đ';
 
-function toDateKey(iso) {
-  // iso: '2026-02-27T...'
-  if (!iso) return 'unknown';
-  return String(iso).slice(0, 10);
+function toDateKey(d) {
+  // YYYY-MM-DD theo giờ local
+  const x = new Date(d);
+  const yyyy = x.getFullYear();
+  const mm = String(x.getMonth() + 1).padStart(2, '0');
+  const dd = String(x.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-function fmtDateVN(key) {
-  // key: YYYY-MM-DD
-  if (!key || key === 'unknown') return 'Không rõ ngày';
-  const [y, m, d] = key.split('-').map(Number);
-  const dt = new Date(y, (m || 1) - 1, d || 1);
-  return dt.toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: '2-digit', day: '2-digit' });
-}
-
-function fmtTimeVN(iso) {
-  if (!iso) return '';
-  const dt = new Date(iso);
-  return dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+function formatVNDate(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString('vi-VN', {
+    weekday: 'long',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
 }
 
 export default function HistoryTodayPage() {
   const router = useRouter();
-
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg] = useState('');
 
-  const [payments, setPayments] = useState([]); // enriched with table_name
-
-  async function loadLast7DaysPayments() {
+  async function loadPayments() {
     setErrMsg('');
-
-    // ✅ chỉ lấy 7 ngày gần nhất (không xoá DB)
-    const fromISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    // 1) load payments
-    const { data: payData, error: payErr } = await supabase
+    const { data, error } = await supabase
       .from('payments')
-      .select('id, created_at, order_id, method, sub_total, service_percent, service_amount, paid_amount')
-      .gte('created_at', fromISO)
+      .select('id, method, sub_total, service_percent, service_amount, paid_amount, created_at')
       .order('created_at', { ascending: false });
 
-    if (payErr) throw payErr;
-
-    const list = payData || [];
-
-    // 2) fetch table_name from orders by order_id (robust hơn join)
-    const orderIds = Array.from(new Set(list.map((x) => x.order_id).filter(Boolean)));
-    let orderMap = {};
-
-    if (orderIds.length) {
-      const { data: orderData, error: oErr } = await supabase
-        .from('orders')
-        .select('id, table_name, table_id')
-        .in('id', orderIds);
-
-      if (oErr) {
-        console.error('Load orders for payments error:', oErr);
-      } else {
-        (orderData || []).forEach((o) => {
-          orderMap[o.id] = o;
-        });
-      }
+    if (error) {
+      console.error('load payments error:', error);
+      setErrMsg('Không tải được lịch sử. Kiểm tra RLS/policy SELECT cho payments và cột created_at.');
+      setRows([]);
+      return;
     }
 
-    const enriched = list.map((p) => ({
-      ...p,
-      table_name: orderMap[p.order_id]?.table_name || ''
-    }));
-
-    setPayments(enriched);
+    setRows(data || []);
   }
 
   useEffect(() => {
-    let alive = true;
     (async () => {
-      try {
-        setLoading(true);
-        await loadLast7DaysPayments();
-      } catch (e) {
-        console.error('History load error:', e);
-        if (alive) setErrMsg('Không tải được lịch sử thanh toán. Kiểm tra bảng payments / RLS policy.');
-      } finally {
-        if (alive) setLoading(false);
-      }
+      setLoading(true);
+      await loadPayments();
+      setLoading(false);
     })();
-
-    return () => {
-      alive = false;
-    };
   }, []);
 
-  // group by day
   const grouped = useMemo(() => {
-    const g = {};
-    for (const p of payments) {
-      const key = toDateKey(p.created_at);
-      if (!g[key]) g[key] = [];
-      g[key].push(p);
+    const map = new Map(); // dateKey -> list
+    for (const r of rows) {
+      const k = toDateKey(r.created_at);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(r);
     }
-    // sort keys desc
-    const keys = Object.keys(g).sort((a, b) => (a > b ? -1 : 1));
+    const keys = Array.from(map.keys()).sort((a, b) => (a < b ? 1 : -1));
     return keys.map((k) => ({
-      dayKey: k,
-      rows: g[k] || []
+      dateKey: k,
+      list: map.get(k),
+      total: map.get(k).reduce((s, x) => s + Number(x.paid_amount || 0), 0)
     }));
-  }, [payments]);
+  }, [rows]);
 
-  const total7Days = useMemo(() => {
-    return payments.reduce((s, p) => s + Number(p.paid_amount || 0), 0);
-  }, [payments]);
+  if (loading) {
+    return (
+      <main style={{ padding: 16 }}>
+        <div>Đang tải...</div>
+      </main>
+    );
+  }
 
   return (
-    <main style={{ padding: 16, maxWidth: 1100, margin: '0 auto' }}>
+    <main style={{ padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <div>
-          <h3 style={{ margin: 0 }}>Lịch sử thanh toán (7 ngày gần nhất)</h3>
-          <div style={{ fontSize: 12, color: '#666' }}>
-            Tổng 7 ngày: <strong>{fmtVND(total7Days)}</strong> • {payments.length} giao dịch
-          </div>
+          <h3 style={{ margin: 0 }}>Lịch sử thanh toán</h3>
+          <div style={{ fontSize: 12, color: '#666' }}>Chia theo ngày</div>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={loadPayments}>Tải lại</button>
           <button onClick={() => router.push('/')}>Về chọn bàn</button>
-          <button
-            onClick={async () => {
-              try {
-                setLoading(true);
-                await loadLast7DaysPayments();
-              } catch (e) {
-                console.error(e);
-                setErrMsg('Không tải lại được.');
-              } finally {
-                setLoading(false);
-              }
-            }}
-          >
-            Tải lại
-          </button>
         </div>
       </div>
 
-      {errMsg && <div style={{ marginTop: 10, color: '#b00020' }}>{errMsg}</div>}
+      {errMsg && <div style={{ marginTop: 10, color: '#b00020', fontSize: 13 }}>{errMsg}</div>}
 
-      {loading ? (
-        <div style={{ marginTop: 12 }}>Đang tải...</div>
-      ) : grouped.length === 0 ? (
-        <div style={{ marginTop: 12, color: '#666' }}>Chưa có thanh toán trong 7 ngày gần nhất.</div>
-      ) : (
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {grouped.map(({ dayKey, rows }) => {
-            const dayTotal = rows.reduce((s, r) => s + Number(r.paid_amount || 0), 0);
+      {grouped.length === 0 && !errMsg && <div style={{ marginTop: 16, color: '#666' }}>Chưa có thanh toán.</div>}
 
-            return (
-              <section key={dayKey} style={{ border: '1px solid #eee', borderRadius: 12, padding: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ fontWeight: 900 }}>{fmtDateVN(dayKey)}</div>
-                  <div style={{ fontWeight: 900 }}>{fmtVND(dayTotal)}</div>
+      <div style={{ marginTop: 14, display: 'grid', gap: 12 }}>
+        {grouped.map((g) => (
+          <div key={g.dateKey} style={{ border: '1px solid #eee', borderRadius: 12, padding: 12, background: '#fff' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+              <div style={{ fontWeight: 900 }}>{formatVNDate(g.dateKey)}</div>
+              <div style={{ fontWeight: 900 }}>Tổng: {fmtVND(g.total)}</div>
+            </div>
+
+            <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+              {g.list.map((r) => (
+                <div
+                  key={r.id}
+                  style={{
+                    borderTop: '1px dashed #eee',
+                    paddingTop: 8,
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto',
+                    gap: 10,
+                    alignItems: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: 13 }}>
+                    <div style={{ fontWeight: 800 }}>
+                      {new Date(r.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} •{' '}
+                      {r.method === 'transfer' ? 'Chuyển khoản' : 'Tiền mặt'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666' }}>
+                      Tạm tính: {fmtVND(r.sub_total)} • Phí DV: {fmtVND(r.service_amount)} ({Number(r.service_percent || 0)}
+                      %)
+                    </div>
+                  </div>
+
+                  <div style={{ fontWeight: 900 }}>{fmtVND(r.paid_amount)}</div>
                 </div>
-
-                <div style={{ marginTop: 10, overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: 'left', padding: '8px 6px', borderBottom: '1px solid #eee' }}>Giờ</th>
-                        <th style={{ textAlign: 'left', padding: '8px 6px', borderBottom: '1px solid #eee' }}>Bàn</th>
-                        <th style={{ textAlign: 'left', padding: '8px 6px', borderBottom: '1px solid #eee' }}>Phương thức</th>
-                        <th style={{ textAlign: 'right', padding: '8px 6px', borderBottom: '1px solid #eee' }}>Tạm tính</th>
-                        <th style={{ textAlign: 'right', padding: '8px 6px', borderBottom: '1px solid #eee' }}>Phí DV</th>
-                        <th style={{ textAlign: 'right', padding: '8px 6px', borderBottom: '1px solid #eee' }}>Thanh toán</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((p) => (
-                        <tr key={p.id}>
-                          <td style={{ padding: '8px 6px', borderBottom: '1px dashed #f0f0f0', whiteSpace: 'nowrap' }}>
-                            {fmtTimeVN(p.created_at)}
-                          </td>
-                          <td style={{ padding: '8px 6px', borderBottom: '1px dashed #f0f0f0' }}>
-                            {p.table_name ? `Bàn ${p.table_name}` : '-'}
-                          </td>
-                          <td style={{ padding: '8px 6px', borderBottom: '1px dashed #f0f0f0' }}>
-                            {p.method === 'transfer' ? 'Chuyển khoản' : 'Tiền mặt'}
-                          </td>
-                          <td style={{ padding: '8px 6px', borderBottom: '1px dashed #f0f0f0', textAlign: 'right' }}>
-                            {fmtVND(p.sub_total)}
-                          </td>
-                          <td style={{ padding: '8px 6px', borderBottom: '1px dashed #f0f0f0', textAlign: 'right' }}>
-                            {fmtVND(p.service_amount)}
-                          </td>
-                          <td style={{ padding: '8px 6px', borderBottom: '1px dashed #f0f0f0', textAlign: 'right', fontWeight: 900 }}>
-                            {fmtVND(p.paid_amount)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
-                  Gợi ý: Trang này chỉ <strong>hiển thị</strong> 7 ngày gần nhất (không xoá dữ liệu trong DB).
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      )}
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }
