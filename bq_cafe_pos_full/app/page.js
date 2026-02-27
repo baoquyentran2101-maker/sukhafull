@@ -10,11 +10,13 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg] = useState('');
 
+  // ✅ UI: chọn khu
+  const [activeArea, setActiveArea] = useState('ALL'); // 'ALL' | areaName
+
   async function loadTables() {
     setErrMsg('');
 
-    // ✅ Lấy thêm area để render phân khu (chỉ thay đổi hiển thị)
-    // Nếu relationship không tên "areas", code vẫn fallback về "Chưa phân khu".
+    // Lấy thêm area để render phân khu
     const { data, error } = await supabase
       .from('cafe_tables')
       .select('id, name, status, area_id, areas(name)')
@@ -41,7 +43,7 @@ export default function HomePage() {
 
   const inUseTables = useMemo(() => tables.filter((t) => t.status === 'in_use'), [tables]);
 
-  // ✅ Group theo khu vực (fallback nếu thiếu area)
+  // Group theo khu vực
   const tablesByArea = useMemo(() => {
     const buckets = new Map();
 
@@ -62,9 +64,23 @@ export default function HomePage() {
       buckets.set(k, list);
     }
 
-    // sort khu theo tên (để UI ổn định)
+    // sort khu theo tên
     return Array.from(buckets.entries()).sort(([a], [b]) => String(a).localeCompare(String(b), 'vi'));
   }, [tables]);
+
+  // Danh sách khu để render chips
+  const areaNames = useMemo(() => tablesByArea.map(([name]) => name), [tablesByArea]);
+
+  // Nếu activeArea không còn tồn tại (vd đổi data) => reset về ALL
+  useEffect(() => {
+    if (activeArea === 'ALL') return;
+    if (!areaNames.includes(activeArea)) setActiveArea('ALL');
+  }, [areaNames, activeArea]);
+
+  const filteredAreas = useMemo(() => {
+    if (activeArea === 'ALL') return tablesByArea;
+    return tablesByArea.filter(([name]) => name === activeArea);
+  }, [tablesByArea, activeArea]);
 
   if (loading) {
     return (
@@ -74,7 +90,7 @@ export default function HomePage() {
     );
   }
 
-  const SmallDot = ({ color = '#d32f2f' }) => (
+  const SmallDot = ({ color }) => (
     <span
       style={{
         display: 'inline-block',
@@ -88,6 +104,22 @@ export default function HomePage() {
     />
   );
 
+  const Chip = ({ label, active, onClick }) => (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '6px 12px',
+        borderRadius: 999,
+        border: active ? '2px solid #1976d2' : '1px solid #ddd',
+        background: active ? '#e3f2fd' : '#fff',
+        fontWeight: 800,
+        cursor: 'pointer'
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <main style={{ padding: 20, maxWidth: 1100, margin: '0 auto' }}>
       {/* Header */}
@@ -97,7 +129,7 @@ export default function HomePage() {
           <div style={{ fontSize: 12, color: '#666' }}>Dashboard</div>
         </div>
 
-        {/* ✅ Giữ nguyên 4 nút */}
+        {/* ✅ giữ nguyên 4 nút */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button onClick={() => router.push('/menu')}>Quản lý menu</button>
           <button onClick={() => router.push('/areas')}>Khu vực</button>
@@ -108,9 +140,7 @@ export default function HomePage() {
 
       {errMsg && <div style={{ color: '#b00020', marginTop: 10 }}>{errMsg}</div>}
 
-      {/* ======================
-          Bàn đang sử dụng
-          ====================== */}
+      {/* Bàn đang sử dụng */}
       <section style={{ marginTop: 18 }}>
         <h3 style={{ margin: '0 0 10px 0' }}>Bàn đang sử dụng</h3>
 
@@ -138,7 +168,6 @@ export default function HomePage() {
                   textAlign: 'left'
                 }}
               >
-                {/* ✅ icon nhỏ hơn */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <SmallDot color="#d32f2f" />
                   <div>Bàn {t.name}</div>
@@ -150,17 +179,23 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* ======================
-          Tất cả bàn (phân khu)
-          ====================== */}
+      {/* Tất cả bàn (lọc theo khu) */}
       <section style={{ marginTop: 22 }}>
         <h3 style={{ margin: '0 0 10px 0' }}>Tất cả bàn</h3>
 
-        {tablesByArea.length === 0 ? (
+        {/* ✅ Chips chọn khu */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          <Chip label="Tất cả khu" active={activeArea === 'ALL'} onClick={() => setActiveArea('ALL')} />
+          {areaNames.map((name) => (
+            <Chip key={name} label={name} active={activeArea === name} onClick={() => setActiveArea(name)} />
+          ))}
+        </div>
+
+        {filteredAreas.length === 0 ? (
           <div style={{ color: '#666' }}>Chưa có dữ liệu bàn.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            {tablesByArea.map(([areaName, list]) => (
+            {filteredAreas.map(([areaName, list]) => (
               <div
                 key={areaName}
                 style={{
