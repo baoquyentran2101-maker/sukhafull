@@ -17,7 +17,6 @@ function formatVNDate(dateKey) {
   });
 }
 
-// convert YYYY-MM-DD (local) -> [startISO, endISO] in UTC ISO for Supabase filter
 function localDayRangeToISO(dateKey) {
   const [y, m, d] = dateKey.split('-').map(Number);
   const start = new Date(y, m - 1, d, 0, 0, 0, 0);
@@ -27,7 +26,7 @@ function localDayRangeToISO(dateKey) {
 
 export default function HistoryByDatePage({ params }) {
   const router = useRouter();
-  const dateKey = params?.date; // YYYY-MM-DD
+  const dateKey = params?.date;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -47,8 +46,8 @@ export default function HistoryByDatePage({ params }) {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('load payments by date error:', error);
-      setErrMsg('Không tải được dữ liệu ngày này. Kiểm tra policy SELECT bảng payments và cột created_at.');
+      console.error(error);
+      setErrMsg('Không tải được dữ liệu ngày này.');
       setRows([]);
       return;
     }
@@ -62,10 +61,12 @@ export default function HistoryByDatePage({ params }) {
       await loadPaymentsOfDay();
       setLoading(false);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateKey]);
 
-  const total = useMemo(() => rows.reduce((s, x) => s + Number(x.paid_amount || 0), 0), [rows]);
+  const total = useMemo(
+    () => rows.reduce((s, x) => s + Number(x.paid_amount || 0), 0),
+    [rows]
+  );
 
   if (loading) {
     return (
@@ -79,23 +80,28 @@ export default function HistoryByDatePage({ params }) {
     <main style={{ padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <div>
-          <h3 style={{ margin: 0 }}>{dateKey ? formatVNDate(dateKey) : 'Chi tiết ngày'}</h3>
+          <h3 style={{ margin: 0 }}>
+            {dateKey ? formatVNDate(dateKey) : 'Chi tiết ngày'}
+          </h3>
           <div style={{ fontSize: 12, color: '#666' }}>
             {rows.length} giao dịch • Tổng: <strong>{fmtVND(total)}</strong>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={loadPaymentsOfDay}>Tải lại</button>
-          <button onClick={() => router.push('/history/today')}>Chọn ngày khác</button>
+          <button onClick={() => router.push('/history/today')}>
+            Chọn ngày khác
+          </button>
         </div>
       </div>
 
-      {errMsg && <div style={{ marginTop: 10, color: '#b00020', fontSize: 13 }}>{errMsg}</div>}
+      {errMsg && (
+        <div style={{ marginTop: 10, color: '#b00020' }}>
+          {errMsg}
+        </div>
+      )}
 
-      {rows.length === 0 && !errMsg && <div style={{ marginTop: 16, color: '#666' }}>Không có thanh toán trong ngày này.</div>}
-
-      <div style={{ marginTop: 14, border: '1px solid #eee', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+      <div style={{ marginTop: 14, border: '1px solid #eee', borderRadius: 12, background: '#fff' }}>
         {rows.map((r, idx) => (
           <div
             key={r.id}
@@ -110,15 +116,22 @@ export default function HistoryByDatePage({ params }) {
           >
             <div style={{ fontSize: 13 }}>
               <div style={{ fontWeight: 900 }}>
-                {new Date(r.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} •{' '}
-                {r.method === 'transfer' ? 'Chuyển khoản' : 'Tiền mặt'}
+                {new Date(r.created_at).toLocaleTimeString('vi-VN', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}{' '}
+                • {r.method === 'transfer' ? 'Chuyển khoản' : 'Tiền mặt'}
               </div>
-              <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
-                Tạm tính: {fmtVND(r.sub_total)} • Phí DV: {fmtVND(r.service_amount)} ({Number(r.service_percent || 0)}%)
+
+              <div style={{ fontSize: 12, color: '#666' }}>
+                Tạm tính: {fmtVND(r.sub_total)} • 
+                Phí DV: {fmtVND(r.service_amount)} ({Number(r.service_percent || 0)}%)
               </div>
             </div>
 
-            <div style={{ fontWeight: 900 }}>{fmtVND(r.paid_amount)}</div>
+            <div style={{ fontWeight: 900 }}>
+              {fmtVND(r.paid_amount)}
+            </div>
           </div>
         ))}
       </div>
